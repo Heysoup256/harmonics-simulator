@@ -419,9 +419,11 @@
       const pluckWidth = pickType === 'nail' ? 0.002 : pickType === 'pick' ? 0.005 : 0.012;
 
       // 弦の物理的損失係数（空気抵抗 + 弦内部粘弾性曲げ摩擦 + ブリッジ音響放射）
-      // ギター開放弦基音: gamma ~ 1.4/s (T60 ~ 5s), ベース開放弦基音: gamma ~ 1.0/s (T60 ~ 7s)
       const baseGamma = instrumentType === 'bass' ? 0.95 : (stringType === 'nylon' ? 1.8 : stringType === 'acoustic' ? 1.3 : 1.45);
       const massFactor = instrumentType === 'bass' ? Math.pow(gaugeFactor, -0.22) : Math.pow(gaugeFactor, -0.10);
+
+      // ⑤ 皮膚の非線形粘弾性（Kelvin-Voigt Skin Model）: 指圧と接触の非線形吸収
+      const skinNonlinearFactor = Math.pow(fingerPressure, 1.25) * (1.0 + 0.45 * fingerPressure);
 
       const harmonics = [];
       let totalSurvivingEnergy = 0;
@@ -447,7 +449,7 @@
             
             const overlapFactor = Math.max(0, Math.min(1.0, integralVal / effectiveW));
             // 節点（overlapFactor ≈ 0）にある倍音は指に触れられていても全くダンプされない
-            const fingerDamping = fingerPressure * overlapFactor * 120.0 * Math.sqrt(gaugeFactor);
+            const fingerDamping = skinNonlinearFactor * overlapFactor * 130.0 * Math.sqrt(gaugeFactor);
             
             totalFingerDampingRate += fingerDamping;
           }
@@ -463,12 +465,10 @@
         const baseInitialAmp = (0.75 / Math.pow(n, alpha)) * pickExcitation;
 
         // 弦固有の物理減衰率 gamma_n [1/sec]
-        // 低次モード: 空気に律速 (gamma ~ 1.0〜1.5/s)
-        // 高次モード: 内部曲げ粘弾性により損失増大 (gamma ∝ sqrt(n) + 0.02*n^1.4)
         const naturalGamma = (baseGamma * massFactor * Math.sqrt(n)) + (0.018 * Math.pow(n, 1.4));
         const totalGamma = naturalGamma + totalFingerDampingRate;
 
-        // 可聴限界(-80dB, 1/10000)までの物理到達時間 T_audible = ln(10000) / totalGamma = 9.21 / totalGamma
+        // 可聴限界(-80dB)までの到達時間
         const audibleDurationSec = 9.21 / totalGamma;
 
         // 100ms後の残存エネルギー（UI表示・支配的倍音判定用）
@@ -484,7 +484,7 @@
           freq: inharmonicFreq,
           midiVal,
           noteFormatted: formatMicrotoneNote(midiVal),
-          overlapFactor: activeFingerCount > 0 ? (totalFingerDampingRate / (activeFingerCount * 120.0 * Math.sqrt(gaugeFactor))) : 0,
+          overlapFactor: activeFingerCount > 0 ? (totalFingerDampingRate / (activeFingerCount * 130.0 * Math.sqrt(gaugeFactor))) : 0,
           fingerDampingRate: totalFingerDampingRate,
           totalDampingRate: totalGamma,
           initialAmp: baseInitialAmp,
@@ -513,7 +513,7 @@
     }
 
     // ============================================================
-    // 物理音響合成エンジン v2 - 弦の初期変位解放・モード減衰物理合成
+    // 物理音響合成エンジン v3 - 非線形張力変動・2次元偏光・フレット衝突力学
     // ============================================================
 
     let audioCtx = null;
@@ -680,16 +680,41 @@
       matLPF.connect(clipper);
       clipper.connect(mb.input); // 共有マスターバスへ接続
 
-      // ---- 弦の初期変位解放＆モード減衰物理合成 ----
-      // 物理法則通りの厳密な指数減衰: 各倍音が物理減衰率 gamma_n に従って -80dB (0.0001) まで正確に減衰
+      // ① 非線形張力変動（Tension Modulation Pitch Glide）の物理パラメータ
+      // 弦を強くピッキングした瞬間の張力増加による初期ピッチ上昇量（セント）
+      const isHarmonic = modalData.dominantHarmonic.n > 1;
+      const tensionGlideCents = (isBass ? 16.0 : 9.0) * (isHarmonic ? 0.20 : 1.0) * (state.pickType === 'nail' ? 0.75 : state.pickType === 'pick' ? 1.0 : 1.35);
+      const tensionTau = isBass ? 0.085 : 0.055; // 張力緩和の時定数
+
+      // ④ フレット衝突力学（String-Fret Collision Dynamics / Buzz）
+      // 開放弦や低いフレットで強くピッキングした瞬間の微小バウンシング過渡音
+      if (!isHarmonic && state.pickType !== 'nail') {
+        const fretCollisionDur = isBass ? 0.008 : 0.005;
+        const collSampleCount = Math.floor(ctx.sampleRate * fretCollisionDur);
+        const collBuf = ctx.createBuffer(1, collSampleCount, ctx.sampleRate);
+        const collData = collBuf.getChannelData(0);
+        for (let i = 0; i < collSampleCount; i++) {
+          const t = i / collSampleCount;
+          // フレット衝突インパルストレイン
+          collData[i] = (Math.random() * 2.0 - 1.0) * Math.exp(-t * 22.0) * 0.15;
+        }
+        const collSource = ctx.createBufferSource();
+        collSource.buffer = collBuf;
+        const collFilter = ctx.createBiquadFilter();
+        collFilter.type = 'highpass';
+        collFilter.frequency.setValueAtTime(isBass ? 2800 : 3800, now);
+        const collGain = ctx.createGain();
+        collGain.gain.setValueAtTime(0.015 * Math.pow(gaugeFactor, 0.2), now);
+        collSource.connect(collFilter);
+        collFilter.connect(collGain);
+        collGain.connect(mb.input);
+        collSource.start(now);
+        collSource.stop(now + fretCollisionDur);
+      }
+
+      // ---- 弦のモード物理合成（①張力変動 + ②2次元偏光 + 減衰） ----
       modalData.harmonics.forEach((h, idx) => {
         if (h.initialAmp < 0.0001) return;
-
-        const osc   = ctx.createOscillator();
-        const hGain = ctx.createGain();
-
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(h.freq, now);
 
         // ベースの低次モードエネルギー補正
         let massBoost = 1.0;
@@ -702,15 +727,42 @@
         const peak = Math.min(0.95, h.initialAmp * massBoost * 1.25);
         const hDecay = Math.min(maxDecaySec, Math.max(0.020, h.decayTimeSec));
 
-        // 初期変位からの解放スナップ（リニアアタック → 物理指数減衰 e^(-gamma*t)）
-        hGain.gain.setValueAtTime(0.00001, now);
-        hGain.gain.linearRampToValueAtTime(peak, now + attackTime);
-        hGain.gain.exponentialRampToValueAtTime(0.0001, now + hDecay);
+        // ① 非線形張力変動ピッチグライドの適用
+        const startFreq = h.freq * Math.pow(2, (tensionGlideCents / Math.sqrt(h.n)) / 1200.0);
 
-        osc.connect(hGain);
-        hGain.connect(masterGain);
-        osc.start(now);
-        osc.stop(now + hDecay + 0.1);
+        // ②-A 垂直偏光モード (Vertical Polarization: ボディに結合して速く減衰)
+        const oscV = ctx.createOscillator();
+        const gainV = ctx.createGain();
+        oscV.type = 'sine';
+        oscV.frequency.setValueAtTime(startFreq, now);
+        oscV.frequency.setTargetAtTime(h.freq, now + attackTime, tensionTau);
+
+        gainV.gain.setValueAtTime(0.00001, now);
+        gainV.gain.linearRampToValueAtTime(peak * 0.65, now + attackTime);
+        gainV.gain.exponentialRampToValueAtTime(0.0001, now + hDecay * 0.9);
+
+        oscV.connect(gainV);
+        gainV.connect(masterGain);
+        oscV.start(now);
+        oscV.stop(now + hDecay + 0.1);
+
+        // ②-B 水平偏光モード (Horizontal Polarization: 微小周波数差と長サステインによる天然の位相ゆらぎ)
+        // ブリッジの直交異方性による微小離調 Δf = 0.08Hz
+        const beatingOffsetHz = (0.04 + 0.02 * (h.n % 3)) * (isBass ? 0.8 : 1.2);
+        const oscH = ctx.createOscillator();
+        const gainH = ctx.createGain();
+        oscH.type = 'sine';
+        oscH.frequency.setValueAtTime(startFreq + beatingOffsetHz, now);
+        oscH.frequency.setTargetAtTime(h.freq + beatingOffsetHz, now + attackTime, tensionTau);
+
+        gainH.gain.setValueAtTime(0.00001, now);
+        gainH.gain.linearRampToValueAtTime(peak * 0.35, now + attackTime * 1.3);
+        gainH.gain.exponentialRampToValueAtTime(0.0001, now + hDecay);
+
+        oscH.connect(gainH);
+        gainH.connect(masterGain);
+        oscH.start(now);
+        oscH.stop(now + hDecay + 0.1);
       });
 
       // ---- クリーンアップ ----
@@ -1354,9 +1406,11 @@
       if (ratio < 0) ratio = 0;
       if (ratio > 0.995) ratio = 0.995;
 
-      // チェック: ドレーグ中の指ハンドルがあるか
+      // チェック: ドラッグ中の指ハンドルがあるか
       if (isDragMove && state.draggingFingerIndex >= 0 && state.draggingFingerIndex < state.fingerCount) {
-        const relFret = getFretFromRatio(ratio);
+        const absFret = getFretFromRatio(ratio);
+        // カポからの相対フレットを正確に計算（0〜28フレットの範囲）
+        const relFret = Math.max(0, Math.min(28, absFret - state.capo));
         state.fingerPositions[state.draggingFingerIndex] = Math.round(relFret * 20) / 20;
         renderApp();
         return;
@@ -1386,8 +1440,10 @@
             state.selectedStringIndex = forcedStringIdx;
           }
 
-          // ピッキング位置を設定
-          state.pickPosRatio = Math.max(0.05, Math.min(0.99, ratio));
+          // カポ有効弦長（カポからブリッジまで）に対する相対ピッキング位置を計算
+          const capoRatio = state.capo > 0 ? (1.0 - Math.pow(2, -state.capo / 12.0)) : 0;
+          const effectiveRatio = Math.max(0.02, Math.min(0.99, (ratio - capoRatio) / (1.0 - capoRatio)));
+          state.pickPosRatio = effectiveRatio;
 
           // ピッキング位置フラッシュラインを表示
           const flashLine = document.getElementById('pluck-flash-line');
@@ -1397,7 +1453,7 @@
             setTimeout(() => { flashLine.style.opacity = '0'; }, 220);
           }
 
-          document.getElementById('label-last-pluck-pos').textContent = `ピッキング位置: ブリッジ寄り (${(ratio * 100).toFixed(0)}%)`;
+          document.getElementById('label-last-pluck-pos').textContent = `ピッキング位置: ブリッジ寄り (${(effectiveRatio * 100).toFixed(0)}%)`;
 
           window.playString(state.selectedStringIndex);
         }
