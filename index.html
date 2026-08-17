@@ -225,12 +225,12 @@
             <span id="label-last-pluck-pos" class="text-[11px] text-amber-300 font-mono font-bold">ピッキング位置: ブリッジ寄り (85%)</span>
           </div>
           <p class="text-[11px] text-slate-400">
-            ※指マークをドラッグして位置を調整できます。各弦を直接タップするとその弦をその位置でピッキングします。
+            ※指マークをドラッグして位置を調整できます。各弦を直接タップするとその弦をその位置でピッキングします。<span class="sm:hidden text-amber-400/90 font-medium">（※左右にスワイプして24フレットまで確認可能）</span>
           </p>
 
-          <!-- Fretboard Container -->
-          <div class="w-full pb-2 pt-1 border border-slate-700/60 rounded-xl bg-slate-950 px-2 sm:px-4">
-            <div id="fretboard-click-area" class="w-full p-2 sm:p-3 relative select-none space-y-2 cursor-pointer">
+          <!-- Fretboard Scroll Wrapper (スマホでもフレットが潰れず快適にスクロール・タップ可能) -->
+          <div class="w-full pb-2 pt-1 border border-slate-700/60 rounded-xl bg-slate-950 px-2 sm:px-4 overflow-x-auto">
+            <div id="fretboard-click-area" class="min-w-[780px] sm:min-w-full p-2 sm:p-3 relative select-none space-y-2 cursor-pointer touch-none">
               
               <!-- Fret Numbers Header -->
               <div class="flex items-center font-mono text-[10px] text-slate-400 pointer-events-none">
@@ -1222,13 +1222,28 @@
               <span class="font-bold font-mono border px-1.5 py-0.5 rounded text-[11px] ${badgeColor}">指${fIdx + 1}</span>
               <span class="font-bold font-mono text-amber-300">+${parseFloat(fPos).toFixed(2)} f</span>
             </div>
-            <input type="range" min="0" max="28" step="0.05" value="${fPos}" class="slider-f${fIdx} w-full accent-amber-400 cursor-pointer h-2 bg-slate-800 rounded-lg">
+            <div class="flex items-center gap-1.5 pt-0.5">
+              <button class="btn-sub-f${fIdx} px-2 py-1 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 rounded text-[10px] font-mono text-slate-300 font-bold border border-slate-700 active:scale-95 transition">-0.1</button>
+              <input type="range" min="0" max="28" step="0.05" value="${fPos}" class="slider-f${fIdx} flex-1 accent-amber-400 cursor-pointer h-3 bg-slate-800 rounded-lg">
+              <button class="btn-add-f${fIdx} px-2 py-1 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 rounded text-[10px] font-mono text-slate-300 font-bold border border-slate-700 active:scale-95 transition">+0.1</button>
+            </div>
           `;
           row.querySelector(`.slider-f${fIdx}`).oninput = (e) => {
             state.fingerPositions[fIdx] = parseFloat(e.target.value);
             renderApp();
           };
           row.querySelector(`.slider-f${fIdx}`).onchange = () => playSelectedString();
+
+          row.querySelector(`.btn-sub-f${fIdx}`).onclick = () => {
+            state.fingerPositions[fIdx] = Math.max(0, Math.round((state.fingerPositions[fIdx] - 0.1) * 20) / 20);
+            renderApp();
+            playSelectedString();
+          };
+          row.querySelector(`.btn-add-f${fIdx}`).onclick = () => {
+            state.fingerPositions[fIdx] = Math.min(28, Math.round((state.fingerPositions[fIdx] + 0.1) * 20) / 20);
+            renderApp();
+            playSelectedString();
+          };
           fingerSlidersContainer.appendChild(row);
         }
       }
@@ -1420,16 +1435,22 @@
           band.style.left = `${leftPct}%`;
           band.style.width = `${widthPct}%`;
 
-          // Handle Badge
+          // Handle Badge (タッチしやすい十分なタッチターゲット 48px 判定)
           const handle = document.createElement('div');
-          handle.className = `absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-6 h-6 rounded-full font-bold text-xs flex items-center justify-center shadow-lg border-2 z-30 cursor-grab active:cursor-grabbing ${
-            fIdx === 0 ? 'bg-rose-500 border-rose-200 text-slate-950' : fIdx === 1 ? 'bg-sky-500 border-sky-200 text-slate-950' : 'bg-amber-500 border-amber-200 text-slate-950'
+          handle.className = `absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-7 h-7 rounded-full font-bold text-xs flex items-center justify-center shadow-xl border-2 z-30 cursor-grab active:cursor-grabbing touch-none select-none ${
+            fIdx === 0 ? 'bg-rose-500 border-rose-200 text-slate-950 shadow-rose-500/50' : fIdx === 1 ? 'bg-sky-500 border-sky-200 text-slate-950 shadow-sky-500/50' : 'bg-amber-500 border-amber-200 text-slate-950 shadow-amber-500/50'
           }`;
           handle.style.left = `${centerRatio * 100}%`;
           handle.textContent = `${fIdx + 1}`;
 
+          // 透明なタッチ拡張領域（スマホでの誤タップ防止・確実なドラッグ開始）
+          const touchExpander = document.createElement('div');
+          touchExpander.className = 'absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-12 h-12 z-40 touch-none cursor-grab';
+          touchExpander.style.left = `${centerRatio * 100}%`;
+
           fingerBandsContainer.appendChild(band);
           fingerBandsContainer.appendChild(handle);
+          fingerBandsContainer.appendChild(touchExpander);
         }
       }
 
@@ -1438,19 +1459,7 @@
       stringsContainer.innerHTML = '';
       state.strings.forEach((str, sIdx) => {
         const strRow = document.createElement('div');
-        strRow.className = 'relative flex items-center h-5 cursor-pointer hover:bg-slate-800/60 rounded transition group';
-        
-        // Exact event handling for each individual string row
-        strRow.onmousedown = (e) => {
-          e.stopPropagation();
-          handleBoardInteraction(e, false, sIdx);
-        };
-        strRow.ontouchstart = (e) => {
-          e.stopPropagation();
-          if (e.touches.length > 0) {
-            handleBoardInteraction(e.touches[0], false, sIdx);
-          }
-        };
+        strRow.className = 'relative flex items-center h-6 cursor-pointer hover:bg-slate-800/60 rounded transition group touch-none';
 
         const isSelected = state.selectedStringIndex === sIdx;
         const labelDiv = document.createElement('div');
@@ -1573,6 +1582,7 @@
 
     // --- Interactive Fretboard Multi-Finger Drag & Tap Pick ---
     const boardArea = document.getElementById('fretboard-click-area');
+    let lastTouchTimestamp = 0;
 
     function getFretFromRatio(ratio) {
       if (ratio <= 0) return 0;
@@ -1581,12 +1591,15 @@
       return Math.min(28.0, Math.max(0, fVal));
     }
 
-    function handleBoardInteraction(e, isDragMove = false, forcedStringIdx = -1) {
-      // フラッシュラインと同じコンテナ（container-finger-bands-overlay）の正確な座標領域を取得してズレを完全解消
+    function handleBoardInteraction(e, isDragMove = false) {
+      // フラッシュラインと同じコンテナ（container-finger-bands-overlay）の正確な座標領域を取得
       const targetArea = document.getElementById('container-finger-bands-overlay') || boardArea;
       const rect = targetArea.getBoundingClientRect();
 
-      const clickX = e.clientX - rect.left;
+      const clientX = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches.length > 0 ? e.touches[0].clientX : 0);
+      const clientY = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches.length > 0 ? e.touches[0].clientY : 0);
+
+      const clickX = clientX - rect.left;
       let ratio = clickX / rect.width;
       if (ratio < 0) ratio = 0;
       if (ratio > 0.998) ratio = 0.998;
@@ -1594,23 +1607,22 @@
       // チェック: ドラッグ中の指ハンドルがあるか
       if (isDragMove && state.draggingFingerIndex >= 0 && state.draggingFingerIndex < state.fingerCount) {
         const absFret = getFretFromRatio(ratio);
-        // カポからの相対フレットを正確に計算（0〜28フレットの範囲）
         const relFret = Math.max(0, Math.min(28, absFret - state.capo));
         state.fingerPositions[state.draggingFingerIndex] = Math.round(relFret * 20) / 20;
         renderApp();
         return;
       }
 
-      // タップ操作（ピッキング）：指マーク以外の場所をクリック／タップした時
+      // タップ操作（ピッキングまたはドラッグ開始）
       if (!isDragMove) {
-        // 指ハンドルの周辺をクリックしたかチェック
+        // 指ハンドルの周辺をクリックしたかチェック（スマホでも掴みやすいよう閾値を 0.055 に拡大）
         let clickedFingerIdx = -1;
         if (state.fingerCount > 0) {
           for (let fIdx = 0; fIdx < state.fingerCount; fIdx++) {
             const fPos = state.fingerPositions[fIdx];
             const absFret = state.capo + fPos;
             const centerRatio = (1.0 - Math.pow(2, -absFret / 12.0));
-            if (Math.abs(ratio - centerRatio) < 0.035) {
+            if (Math.abs(ratio - centerRatio) < 0.055) {
               clickedFingerIdx = fIdx;
               break;
             }
@@ -1620,9 +1632,17 @@
         if (clickedFingerIdx >= 0) {
           state.draggingFingerIndex = clickedFingerIdx;
         } else {
-          // タップされた弦を正確に選択
-          if (forcedStringIdx >= 0 && forcedStringIdx < state.strings.length) {
-            state.selectedStringIndex = forcedStringIdx;
+          // タップされたY座標から対象の弦を正確に特定
+          const stringsContainer = document.getElementById('fret-strings-container');
+          if (stringsContainer) {
+            const strRows = stringsContainer.children;
+            for (let sIdx = 0; sIdx < strRows.length; sIdx++) {
+              const strRect = strRows[sIdx].getBoundingClientRect();
+              if (clientY >= strRect.top - 4 && clientY <= strRect.bottom + 4) {
+                state.selectedStringIndex = sIdx;
+                break;
+              }
+            }
           }
 
           // カポ有効弦長（カポからブリッジまで）に対する相対ピッキング位置を計算
@@ -1645,36 +1665,49 @@
             lastPluckLabel.textContent = `ピッキング位置: ${posDesc} (${(effectiveRatio * 100).toFixed(0)}%)`;
           }
 
+          // 単一の発音のみを確実にトリガー（2回再生バグを防止）
           window.playString(state.selectedStringIndex);
         }
       }
     }
 
+    // マウスイベント（タッチ直後の偽マウスイベントは無視）
     boardArea.addEventListener('mousedown', (e) => {
+      if (Date.now() - lastTouchTimestamp < 600) return;
       handleBoardInteraction(e, false);
     });
     window.addEventListener('mousemove', (e) => {
+      if (Date.now() - lastTouchTimestamp < 600) return;
       if (state.draggingFingerIndex >= 0) {
         handleBoardInteraction(e, true);
       }
     });
     window.addEventListener('mouseup', () => {
+      if (Date.now() - lastTouchTimestamp < 600) return;
       if (state.draggingFingerIndex >= 0) {
         state.draggingFingerIndex = -1;
         playSelectedString();
       }
     });
 
+    // タッチイベント（スマホ・タブレット完全対応）
     boardArea.addEventListener('touchstart', (e) => {
-      if (e.touches.length > 0) handleBoardInteraction(e.touches[0], false);
+      lastTouchTimestamp = Date.now();
+      if (e.touches.length > 0) {
+        handleBoardInteraction(e.touches[0], false);
+      }
     }, { passive: true });
+
     window.addEventListener('touchmove', (e) => {
       if (state.draggingFingerIndex >= 0 && e.touches.length > 0) {
+        lastTouchTimestamp = Date.now();
         handleBoardInteraction(e.touches[0], true);
       }
     }, { passive: true });
+
     window.addEventListener('touchend', () => {
       if (state.draggingFingerIndex >= 0) {
+        lastTouchTimestamp = Date.now();
         state.draggingFingerIndex = -1;
         playSelectedString();
       }
