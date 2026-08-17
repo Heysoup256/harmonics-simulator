@@ -648,9 +648,15 @@
         }
         pickupSensitivity = Math.max(0.08, pickupSensitivity);
 
-        // 初期励起振幅
+        // 初期励起振幅:
+        // 物理力学: 指が触れている位置で振幅を持つモード（節点でない倍音）は、ピッキングの瞬間から指の皮膚によって振幅が激しくクランプされる。
+        // 節点（ノード、totalFingerDampingRate ≈ 0）にある倍音のみが100%の振幅で励起される。
+        const fingerInitialSuppression = activeFingerCount > 0 
+          ? Math.exp(-totalFingerDampingRate * 0.060) 
+          : 1.0;
+
         const puMultiplier = pickupType === 'piezo' ? 1.0 : (pickupSensitivity * 1.18);
-        const baseInitialAmp = (0.75 / Math.pow(n, alpha)) * pickExcitation * puMultiplier;
+        const baseInitialAmp = (0.75 / Math.pow(n, alpha)) * pickExcitation * puMultiplier * fingerInitialSuppression;
 
         // 弦固有の厳密な物理減衰率 gamma_n [1/sec]:
         // gamma_n = gamma_air (質量とモード平方根依存) + gamma_visco (内部曲げヒステリシス n^1.35) + gamma_bridge
