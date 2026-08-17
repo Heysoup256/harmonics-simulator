@@ -122,6 +122,16 @@
           </div>
 
           <div class="space-y-1">
+            <label class="text-xs text-slate-300 font-medium block">ピックアップ選択</label>
+            <select id="select-pickup-type" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-amber-300 font-medium focus:outline-none focus:border-amber-400">
+              <option value="both">センター / ミックス (Neck + Bridge)</option>
+              <option value="neck">フロント (Neck PU: 甘く太いトーン)</option>
+              <option value="bridge">リア (Bridge PU: 鋭くエッジの効いたトーン)</option>
+              <option value="piezo">アコースティック / ピエゾ (Raw Body)</option>
+            </select>
+          </div>
+
+          <div class="space-y-1">
             <label class="text-xs text-slate-300 font-medium block">ボディ材（木材種）</label>
             <select id="select-body-type" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-amber-400">
               <option value="bright">明るい（スプルース/アッシュ/メイプル）</option>
@@ -325,6 +335,7 @@
       
       stringType: 'electric',
       pickType: 'pick', // ギター: ピックがデフォルト
+      pickupType: 'both', // 'neck' | 'bridge' | 'both' | 'piezo'
 
       fingerCount: 1, // 0, 1, 2, 3
       fingerPositions: [12.0, 7.0, 5.0], // 指1, 指2, 指3 のフレット位置
@@ -337,7 +348,7 @@
       strings: [],
       
       waveTime: 0,
-      draggingFingerIndex: -1
+    draggingFingerIndex: -1
     };
 
     // --- Math & Harmonic Helper Functions ---
@@ -382,7 +393,7 @@
     }
 
     // --- Physics Engine: Scale Length, Artificial Harmonics & Automatic Fundamental Tuning ---
-    function calculateHarmonicModalData(stringObj, capoVal, fingerPositionsArray, activeFingerCount, fingerWidthMm, fingerPressure, pickPosRatio, stringType, pickType, instrumentType, pressedFret) {
+    function calculateHarmonicModalData(stringObj, capoVal, fingerPositionsArray, activeFingerCount, fingerWidthMm, fingerPressure, pickPosRatio, stringType, pickType, instrumentType, pressedFret, pickupType = 'both') {
       const fullScale = instrumentType === 'bass' ? 0.864 : 0.648;
       const effectiveCapoPlusPressed = capoVal + pressedFret;
       const L_prime = fullScale * Math.pow(2, -effectiveCapoPlusPressed / 12.0);
@@ -417,13 +428,16 @@
       const pluckWidth = pickType === 'nail' ? 0.002 : pickType === 'pick' ? 0.005 : 0.012;
 
       // 弦の基礎物理損失（空気抵抗摩擦 + ブリッジ音響放射）
-      // 物理法則: 線密度 μ (gaugeFactor) が大きいほど、空気抵抗損失 gamma_air は低下しサステインが伸びる
       const bodyRadiationGamma = stringType === 'acoustic' ? 0.32 : stringType === 'nylon' ? 0.45 : 0.22;
       const airLossBase = instrumentType === 'bass' ? 0.48 : (stringType === 'nylon' ? 0.95 : 0.70);
       const massAirFactor = Math.pow(gaugeFactor, -0.32);
 
       // 皮膚の非線形粘弾性（Kelvin-Voigt Skin Model）
       const skinNonlinearFactor = Math.pow(fingerPressure, 1.25) * (1.0 + 0.45 * fingerPressure);
+
+      // ピックアップ位置における空間的サンプリング（コームフィルター物理）
+      const x_pu_neck = L_prime * 0.82;
+      const x_pu_bridge = L_prime * 0.90;
 
       const harmonics = [];
       let totalSurvivingEnergy = 0;
@@ -461,8 +475,20 @@
         const rawExcitation = Math.sin(kn * x_pick) * sincVal;
         const pickExcitation = Math.sqrt(rawExcitation * rawExcitation + 0.025);
 
+        // 電磁気ピックアップ伝達関数（ファラデーの法則 × コームフィルター）
+        let pickupSensitivity = 1.0;
+        if (pickupType === 'neck') {
+          pickupSensitivity = Math.abs(Math.sin(kn * x_pu_neck));
+        } else if (pickupType === 'bridge') {
+          pickupSensitivity = Math.abs(Math.sin(kn * x_pu_bridge));
+        } else if (pickupType === 'both') {
+          pickupSensitivity = (Math.abs(Math.sin(kn * x_pu_neck)) + Math.abs(Math.sin(kn * x_pu_bridge))) / 2.0;
+        }
+        pickupSensitivity = Math.max(0.08, pickupSensitivity);
+
         // 初期励起振幅
-        const baseInitialAmp = (0.75 / Math.pow(n, alpha)) * pickExcitation;
+        const puMultiplier = pickupType === 'piezo' ? 1.0 : (pickupSensitivity * 1.18);
+        const baseInitialAmp = (0.75 / Math.pow(n, alpha)) * pickExcitation * puMultiplier;
 
         // 弦固有の厳密な物理減衰率 gamma_n [1/sec]:
         // gamma_n = gamma_air (質量とモード平方根依存) + gamma_visco (内部曲げヒステリシス n^1.35) + gamma_bridge
@@ -598,8 +624,8 @@
       return ws;
     }
 
-    // 楽器の胴体・空洞（キャビティ）による自然な音響伝達関数
-    function createBodyResonanceShaper(ctx, instrumentType, stringType, bodyType, now) {
+    // 楽器の胴体・空洞・ピックアップ特性による音響伝達関数
+    function createBodyResonanceShaper(ctx, instrumentType, stringType, bodyType, pickupType, now) {
       const isBass = instrumentType === 'bass';
       
       const lowBody = ctx.createBiquadFilter();
@@ -608,12 +634,12 @@
         const f = bodyType === 'warm' ? 95 : bodyType === 'bright' ? 140 : 115;
         lowBody.frequency.setValueAtTime(f, now);
         lowBody.Q.setValueAtTime(1.1, now);
-        lowBody.gain.setValueAtTime(3.5, now);
+        lowBody.gain.setValueAtTime(pickupType === 'neck' ? 4.5 : pickupType === 'bridge' ? 2.0 : 3.5, now);
       } else {
         const f = stringType === 'acoustic' ? 120 : 180;
         lowBody.frequency.setValueAtTime(f, now);
         lowBody.Q.setValueAtTime(1.0, now);
-        lowBody.gain.setValueAtTime(2.8, now);
+        lowBody.gain.setValueAtTime(pickupType === 'neck' ? 3.8 : pickupType === 'bridge' ? 1.5 : 2.8, now);
       }
 
       const midBody = ctx.createBiquadFilter();
@@ -622,11 +648,11 @@
         const f = bodyType === 'warm' ? 380 : bodyType === 'bright' ? 620 : 480;
         midBody.frequency.setValueAtTime(f, now);
         midBody.Q.setValueAtTime(0.9, now);
-        midBody.gain.setValueAtTime(2.0, now);
+        midBody.gain.setValueAtTime(pickupType === 'bridge' ? 3.2 : 2.0, now);
       } else {
         midBody.frequency.setValueAtTime(stringType === 'acoustic' ? 450 : 800, now);
         midBody.Q.setValueAtTime(0.8, now);
-        midBody.gain.setValueAtTime(1.6, now);
+        midBody.gain.setValueAtTime(pickupType === 'bridge' ? 2.5 : 1.6, now);
       }
 
       lowBody.connect(midBody);
@@ -678,11 +704,14 @@
       activeVoices.push({ masterGain, startTime: now });
 
       // ---- 信号チェーン ----
-      const bodyShaper = createBodyResonanceShaper(ctx, state.instrument, state.stringType, state.bodyType, now);
+      const bodyShaper = createBodyResonanceShaper(ctx, state.instrument, state.stringType, state.bodyType, state.pickupType, now);
 
       const matLPF = ctx.createBiquadFilter();
       matLPF.type = 'lowpass';
-      const openLPFCutoff = isBass ? 8500 : {nylon: 4500, acoustic: 8000, electric: 11000}[state.stringType] || 9500;
+      let openLPFCutoff = isBass ? 8500 : {nylon: 4500, acoustic: 8000, electric: 11000}[state.stringType] || 9500;
+      if (state.pickupType === 'bridge') openLPFCutoff = Math.min(18000, openLPFCutoff * 1.25);
+      else if (state.pickupType === 'neck') openLPFCutoff *= 0.85;
+
       matLPF.frequency.setValueAtTime(openLPFCutoff, now);
       matLPF.Q.setValueAtTime(0.707, now);
 
@@ -880,6 +909,7 @@
           audioEnabled: state.audioEnabled,
           stringType: state.stringType,
           pickType: state.pickType,
+          pickupType: state.pickupType,
           bodyType: state.bodyType,
           fingerCount: state.fingerCount,
           fingerPositions: state.fingerPositions,
@@ -919,6 +949,7 @@
       state.audioEnabled = true;
       state.stringType = 'electric';
       state.pickType = 'pick';
+      state.pickupType = 'both';
       state.bodyType = 'standard';
       state.fingerCount = 1;
       state.fingerPositions = [12.0, 7.0, 5.0];
@@ -958,7 +989,8 @@
         state.stringType,
         state.pickType,
         state.instrument,
-        state.pressedFret
+        state.pressedFret,
+        state.pickupType
       );
 
       state.waveTime += 0.08;
@@ -1060,7 +1092,8 @@
         state.stringType,
         state.pickType,
         state.instrument,
-        state.pressedFret
+        state.pressedFret,
+        state.pickupType
       );
       synthesizePhysicalHarmonic(modalData, state.instrument === 'bass');
       renderApp();
@@ -1103,6 +1136,9 @@
 
       const pickTypeSelect = document.getElementById('select-pick-type');
       if (pickTypeSelect) pickTypeSelect.value = state.pickType;
+
+      const pickupTypeSelect = document.getElementById('select-pickup-type');
+      if (pickupTypeSelect) pickupTypeSelect.value = state.pickupType;
 
       const bodyTypeSelect = document.getElementById('select-body-type');
       if (bodyTypeSelect) bodyTypeSelect.value = state.bodyType;
@@ -1161,23 +1197,36 @@
       stringsContainer.innerHTML = '';
       state.strings.forEach((str, idx) => {
         const row = document.createElement('div');
-        row.className = 'flex items-center justify-between bg-slate-900/80 px-2 py-0.5 rounded-xl border border-slate-700/60 text-xs';
+        row.className = 'flex items-center justify-between bg-slate-900/80 px-2 py-1 rounded-xl border border-slate-700/60 text-xs gap-1';
         let noteOptions = NOTE_NAMES.map(n => `<option value="${n}" ${str.note === n ? 'selected' : ''}>${n}</option>`).join('');
         let octOptions = [0,1,2,3,4,5].map(o => `<option value="${o}" ${str.octave === o ? 'selected' : ''}>Oct ${o}</option>`).join('');
 
         row.innerHTML = `
-          <div class="flex items-center gap-1.5">
-            <span class="font-bold text-slate-400 text-[11px] w-6">${idx + 1}弦</span>
-            <span class="text-[9px] font-mono text-amber-400/80 bg-slate-950 px-1 rounded">${str.gaugeInch}</span>
+          <div class="flex items-center gap-1 shrink-0">
+            <span class="font-bold text-slate-400 text-[11px] w-5">${idx + 1}弦</span>
           </div>
           <div class="flex items-center gap-1">
             <select class="sel-note bg-slate-800 text-amber-300 font-mono rounded px-1 py-0.5 border border-slate-700 focus:outline-none text-[11px]">${noteOptions}</select>
             <select class="sel-oct bg-slate-800 text-slate-300 font-mono rounded px-1 py-0.5 border border-slate-700 focus:outline-none text-[11px]">${octOptions}</select>
           </div>
-          <span class="font-mono text-slate-400 text-[11px] w-10 text-right">${getSoundingNoteName(str.note, str.octave, state.capo)}</span>
+          <div class="flex items-center gap-0.5">
+            <input type="number" min="0.10" max="4.50" step="0.01" value="${str.gaugeMm}" class="input-gauge w-14 bg-slate-950 text-amber-400 font-mono text-[10px] px-1 py-0.5 rounded border border-slate-700 text-center focus:border-amber-400 focus:outline-none" title="弦の太さ (mm)">
+            <span class="text-[9px] text-slate-500 font-mono">mm</span>
+          </div>
+          <span class="font-mono text-slate-400 text-[11px] w-8 text-right shrink-0">${getSoundingNoteName(str.note, str.octave, state.capo)}</span>
         `;
         row.querySelector('.sel-note').onchange = (e) => { str.note = e.target.value; state.preset = 'custom'; renderApp(); };
         row.querySelector('.sel-oct').onchange = (e) => { str.octave = parseInt(e.target.value); state.preset = 'custom'; renderApp(); };
+        row.querySelector('.input-gauge').oninput = (e) => {
+          const val = parseFloat(e.target.value);
+          if (!isNaN(val) && val > 0) {
+            str.gaugeMm = val;
+            str.gaugeInch = `.${Math.round(val / 0.0254)}`;
+            state.preset = 'custom';
+            renderApp();
+          }
+        };
+        row.querySelector('.input-gauge').onchange = () => playSelectedString();
         stringsContainer.appendChild(row);
       });
 
@@ -1272,17 +1321,37 @@
         }
       }
 
-      // Pickups & Bridge Areas (Neck PU @ 82%, Bridge PU @ 90%, Bridge @ 100%)
+      // Pickups & Bridge Areas (Neck PU @ 82%, Bridge PU @ 90%, Bridge @ 100%) - インタラクティブ切替可能
+      const isNeckActive = state.pickupType === 'neck' || state.pickupType === 'both';
+      const isBridgeActive = state.pickupType === 'bridge' || state.pickupType === 'both';
+
       const neckPu = document.createElement('div');
-      neckPu.className = 'absolute top-0 bottom-0 w-4 bg-slate-800 border border-slate-700 rounded z-10 -translate-x-1/2 flex items-center justify-center';
+      neckPu.className = `absolute top-0 bottom-0 w-4 border rounded z-20 -translate-x-1/2 flex items-center justify-center cursor-pointer transition-all duration-200 ${
+        isNeckActive ? 'bg-amber-500/30 border-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.6)]' : 'bg-slate-800 border-slate-700 opacity-60 hover:opacity-90'
+      }`;
       neckPu.style.left = '82%';
-      neckPu.innerHTML = '<div class="w-1 h-3/4 bg-slate-600 rounded-full"></div>';
+      neckPu.title = 'フロント (Neck Pickup) - クリックで切替';
+      neckPu.innerHTML = '<div class="w-1 h-3/4 bg-slate-400 rounded-full"></div>';
+      neckPu.onclick = (e) => {
+        e.stopPropagation();
+        state.pickupType = state.pickupType === 'neck' ? 'both' : (state.pickupType === 'both' ? 'bridge' : 'neck');
+        renderApp();
+        playSelectedString();
+      };
       inlaysContainer.appendChild(neckPu);
 
       const bridgePu = document.createElement('div');
-      bridgePu.className = 'absolute top-0 bottom-0 w-4 bg-slate-800 border border-slate-700 rounded z-10 -translate-x-1/2 flex items-center justify-center';
+      bridgePu.className = `absolute top-0 bottom-0 w-4 border rounded z-20 -translate-x-1/2 flex items-center justify-center cursor-pointer transition-all duration-200 ${
+        isBridgeActive ? 'bg-amber-500/30 border-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.6)]' : 'bg-slate-800 border-slate-700 opacity-60 hover:opacity-90'
+      }`;
       bridgePu.style.left = '90%';
-      bridgePu.innerHTML = '<div class="w-1 h-3/4 bg-slate-600 rounded-full"></div>';
+      bridgePu.title = 'リア (Bridge Pickup) - クリックで切替';
+      bridgePu.onclick = (e) => {
+        e.stopPropagation();
+        state.pickupType = state.pickupType === 'bridge' ? 'both' : (state.pickupType === 'both' ? 'neck' : 'bridge');
+        renderApp();
+        playSelectedString();
+      };
       inlaysContainer.appendChild(bridgePu);
 
       const bridgeVal = document.createElement('div');
@@ -1291,7 +1360,6 @@
       inlaysContainer.appendChild(bridgeVal);
 
       // Render Active Finger Overlay Bands & Drag Handles
-      // ベース（864mm）とギター（648mm）の弦長スケール比率を正確に反映
       const fingerBandsContainer = document.getElementById('container-finger-bands-overlay');
       fingerBandsContainer.innerHTML = '';
 
@@ -1404,10 +1472,11 @@
         state.stringType,
         state.pickType,
         state.instrument,
-        state.pressedFret
+        state.pressedFret,
+        state.pickupType
       );
 
-      document.getElementById('label-current-spectrum-string').textContent = `${state.selectedStringIndex + 1}弦 (${curStr.note}${curStr.octave}) の絶対音量スペクトル`;
+      document.getElementById('label-current-spectrum-string').textContent = `${state.selectedStringIndex + 1}弦 (${curStr.note}${curStr.octave}) の絶対音量スペクトル [PU: ${state.pickupType.toUpperCase()}]`;
       document.getElementById('label-current-string-gauge').textContent = `スケール(${state.instrument === 'bass' ? '34"' : '25.5"'}) / 太さ: ${modalData.gaugeMm} mm (${modalData.gaugeInch})`;
 
       const barsGrid = document.getElementById('spectrum-bars-grid');
@@ -1432,6 +1501,7 @@
             <div>絶対音量: <b>${heightPct}%</b></div>
             <div>剛性・指減衰: <b>${Math.round(h.overlapFactor * 100)}%</b></div>
           </div>
+          <span class="text-[9px] font-mono text-slate-400 mb-1 font-bold ${isDominant ? 'text-amber-300 font-extrabold scale-110' : ''}">${heightPct > 0 ? heightPct + '%' : ''}</span>
           <div class="w-full rounded-t transition-all duration-150 ${barColor}" style="height: ${Math.max(2, heightPct)}%;"></div>
           <span class="text-[9px] font-mono mt-1 ${isDominant && heightPct > 12 ? 'text-amber-400 font-bold' : 'text-slate-500'}">${h.n}</span>
         `;
@@ -1477,15 +1547,14 @@
     }
 
     function handleBoardInteraction(e, isDragMove = false, forcedStringIdx = -1) {
-      const rect = boardArea.getBoundingClientRect();
-      const spacerWidth = 32;
-      const effectiveLeft = rect.left + spacerWidth;
-      const effectiveWidth = rect.width - spacerWidth;
+      // フラッシュラインと同じコンテナ（container-finger-bands-overlay）の正確な座標領域を取得してズレを完全解消
+      const targetArea = document.getElementById('container-finger-bands-overlay') || boardArea;
+      const rect = targetArea.getBoundingClientRect();
 
-      const clickX = e.clientX - effectiveLeft;
-      let ratio = clickX / effectiveWidth;
+      const clickX = e.clientX - rect.left;
+      let ratio = clickX / rect.width;
       if (ratio < 0) ratio = 0;
-      if (ratio > 0.995) ratio = 0.995;
+      if (ratio > 0.998) ratio = 0.998;
 
       // チェック: ドラッグ中の指ハンドルがあるか
       if (isDragMove && state.draggingFingerIndex >= 0 && state.draggingFingerIndex < state.fingerCount) {
@@ -1615,6 +1684,14 @@
       renderApp();
       playSelectedString();
     };
+    const selectPickup = document.getElementById('select-pickup-type');
+    if (selectPickup) {
+      selectPickup.onchange = (e) => {
+        state.pickupType = e.target.value;
+        renderApp();
+        playSelectedString();
+      };
+    }
     document.getElementById('select-body-type').onchange = (e) => {
       state.bodyType = e.target.value;
       renderApp();
@@ -1654,7 +1731,8 @@
             state.stringType,
             state.pickType,
             state.instrument,
-            state.pressedFret
+            state.pressedFret,
+            state.pickupType
           );
           synthesizePhysicalHarmonic(modalData, state.instrument === 'bass');
         }, sIdx * strumInterval);
