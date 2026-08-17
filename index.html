@@ -45,6 +45,11 @@
           <i class="fa-solid fa-volume-high"></i>
           <span class="hidden sm:inline">サウンド</span>
         </button>
+
+        <button id="btn-reset-settings" class="px-2.5 py-1.5 rounded-xl border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-rose-400 text-xs font-medium flex items-center gap-1 transition" title="すべての設定をデフォルトに戻す">
+          <i class="fa-solid fa-arrow-rotate-left"></i>
+          <span class="hidden sm:inline">リセット</span>
+        </button>
       </div>
     </header>
 
@@ -861,6 +866,71 @@
       }
     }
 
+    // --- LocalStorage Persistence ---
+    const STORAGE_KEY = 'harmonics_simulator_state_v2';
+
+    function saveStateToLocalStorage() {
+      try {
+        const dataToSave = {
+          instrument: state.instrument,
+          stringCount: state.stringCount,
+          preset: state.preset,
+          capo: state.capo,
+          pressedFret: state.pressedFret,
+          audioEnabled: state.audioEnabled,
+          stringType: state.stringType,
+          pickType: state.pickType,
+          bodyType: state.bodyType,
+          fingerCount: state.fingerCount,
+          fingerPositions: state.fingerPositions,
+          fingerWidthMm: state.fingerWidthMm,
+          fingerPressure: state.fingerPressure,
+          pickPosRatio: state.pickPosRatio,
+          selectedStringIndex: state.selectedStringIndex,
+          strings: state.strings
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
+      } catch(e) {}
+    }
+
+    function loadStateFromLocalStorage() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === 'object') {
+            Object.assign(state, parsed);
+            return true;
+          }
+        }
+      } catch(e) {}
+      return false;
+    }
+
+    function resetToDefaultSettings() {
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+      } catch(e) {}
+      state.instrument = 'guitar';
+      state.stringCount = 6;
+      state.preset = 'standard';
+      state.capo = 0;
+      state.pressedFret = 0;
+      state.audioEnabled = true;
+      state.stringType = 'electric';
+      state.pickType = 'pick';
+      state.bodyType = 'standard';
+      state.fingerCount = 1;
+      state.fingerPositions = [12.0, 7.0, 5.0];
+      state.fingerWidthMm = 3.0;
+      state.fingerPressure = 0.5;
+      state.pickPosRatio = 0.85;
+      state.selectedStringIndex = 0;
+      applyPreset();
+      renderApp();
+      playSelectedString();
+    }
+
     // --- Canvas Realtime Wave Animation Renderer ---
     function drawCanvasStringWave() {
       const canvas = document.getElementById('canvas-string-wave');
@@ -905,7 +975,7 @@
       ctx.moveTo(width - paddingX, 10); ctx.lineTo(width - paddingX, height - 10);
       ctx.stroke();
 
-      // Finger Touch Band Highlight for Active Fingers
+      // Finger Touch Band Highlight for Active Fingers (ベース/ギター弦長と有効弦長に完全連動)
       if (state.fingerCount > 0) {
         for (let fIdx = 0; fIdx < state.fingerCount; fIdx++) {
           const barreFretRel = state.fingerPositions[fIdx];
@@ -914,15 +984,16 @@
           const effectiveCapoPlusPressed = state.capo + state.pressedFret;
           const L_prime = fullScale * Math.pow(2, -effectiveCapoPlusPressed / 12.0);
           const x_touch = L_prime * (1.0 - Math.pow(2, -touchFretDist / 12.0));
-          const touchRatio = x_touch / L_prime;
+          const touchRatio = Math.max(0, Math.min(1.0, x_touch / L_prime));
 
           const xTouchPx = paddingX + activeWidth * touchRatio;
-          const fingerBandPx = Math.max(3, (state.fingerWidthMm / 648.0) * activeWidth * 2.5);
+          // 有効弦長 L' に対する指接触幅の正確な物理比率（ベースでは細く、ギターでは太く描画）
+          const fingerBandPx = Math.max(2, (state.fingerWidthMm / (L_prime * 1000.0)) * activeWidth);
 
-          ctx.fillStyle = fIdx === 0 ? 'rgba(244, 63, 94, 0.25)' : fIdx === 1 ? 'rgba(56, 189, 248, 0.25)' : 'rgba(250, 204, 21, 0.25)';
+          ctx.fillStyle = fIdx === 0 ? 'rgba(244, 63, 94, 0.30)' : fIdx === 1 ? 'rgba(56, 189, 248, 0.30)' : 'rgba(250, 204, 21, 0.30)';
           ctx.fillRect(xTouchPx - fingerBandPx / 2, 8, fingerBandPx, height - 16);
-          ctx.strokeStyle = fIdx === 0 ? 'rgba(244, 63, 94, 0.8)' : fIdx === 1 ? 'rgba(56, 189, 248, 0.8)' : 'rgba(250, 204, 21, 0.8)';
-          ctx.lineWidth = 1;
+          ctx.strokeStyle = fIdx === 0 ? 'rgba(244, 63, 94, 0.85)' : fIdx === 1 ? 'rgba(56, 189, 248, 0.85)' : 'rgba(250, 204, 21, 0.85)';
+          ctx.lineWidth = 1.5;
           ctx.strokeRect(xTouchPx - fingerBandPx / 2, 8, fingerBandPx, height - 16);
         }
       }
@@ -950,12 +1021,20 @@
           totalY += h.survivingAmp * spatialVal * temporalVal * 32.0;
         });
 
-        const drawX = paddingX + ratio * activeWidth;
-        const drawY = centerY + totalY;
+        const px = paddingX + activeWidth * ratio;
+        const py = centerY + totalY;
 
-        if (i === 0) ctx.moveTo(drawX, drawY);
-        else ctx.lineTo(drawX, drawY);
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
       }
+      ctx.stroke();
+
+      // Draw Center Baseline
+      ctx.strokeStyle = 'rgba(148, 163, 184, 0.2)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(paddingX, centerY);
+      ctx.lineTo(width - paddingX, centerY);
       ctx.stroke();
 
       requestAnimationFrame(drawCanvasStringWave);
@@ -992,59 +1071,35 @@
       window.playString(state.selectedStringIndex);
     }
 
-    // --- DOM Render Functions ---
+    // --- Main UI Renderer ---
     function renderApp() {
-      document.getElementById('label-instrument-type').textContent = state.instrument === 'guitar' ? 'Guitar (25.5")' : 'Bass (34" Long)';
-      document.getElementById('btn-inst-guitar').className = `flex-1 sm:flex-initial px-3 py-1.5 rounded-lg transition ${state.instrument === 'guitar' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400'}`;
-      document.getElementById('btn-inst-bass').className = `flex-1 sm:flex-initial px-3 py-1.5 rounded-lg transition ${state.instrument === 'bass' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400'}`;
+      saveStateToLocalStorage();
 
+      // Instrument Active Button States
+      document.getElementById('btn-inst-guitar').className = `px-3 py-1.5 rounded-xl font-semibold text-xs sm:text-sm flex items-center gap-1.5 transition ${state.instrument === 'guitar' ? 'bg-amber-500 text-slate-950 shadow-md font-bold' : 'text-slate-400 hover:text-slate-200'}`;
+      document.getElementById('btn-inst-bass').className = `px-3 py-1.5 rounded-xl font-semibold text-xs sm:text-sm flex items-center gap-1.5 transition ${state.instrument === 'bass' ? 'bg-amber-500 text-slate-950 shadow-md font-bold' : 'text-slate-400 hover:text-slate-200'}`;
+
+      // Audio Toggle Button State
       const audioBtn = document.getElementById('btn-audio-toggle');
-      audioBtn.className = `px-3 py-1.5 rounded-xl border text-xs font-medium flex items-center gap-1.5 transition ${state.audioEnabled ? 'bg-amber-500/20 border-amber-400 text-amber-300' : 'bg-slate-900 border-slate-700 text-slate-500'}`;
-      audioBtn.innerHTML = `<i class="fa-solid ${state.audioEnabled ? 'fa-volume-high' : 'fa-volume-xmark'}"></i><span class="hidden sm:inline">サウンド</span>`;
+      audioBtn.innerHTML = state.audioEnabled ? '<i class="fa-solid fa-volume-high"></i> 音声: ON' : '<i class="fa-solid fa-volume-xmark"></i> 音声: OFF';
+      audioBtn.className = `px-3 py-1.5 rounded-xl font-semibold text-xs transition border flex items-center gap-1.5 ${state.audioEnabled ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow' : 'bg-rose-500/20 text-rose-300 border-rose-500/40'}`;
 
-      const strBtnContainer = document.getElementById('string-count-buttons');
-      strBtnContainer.innerHTML = '';
-      const counts = state.instrument === 'guitar' ? [6, 7] : [4, 5, 6];
-      counts.forEach(c => {
-        const btn = document.createElement('button');
-        btn.textContent = `${c}弦`;
-        btn.className = `px-2.5 py-1 rounded-lg text-xs transition ${state.stringCount === c ? 'bg-amber-500 text-slate-950 font-bold' : 'bg-slate-700 text-slate-300'}`;
-        btn.onclick = () => {
-          state.stringCount = c;
-          state.selectedStringIndex = 0;
-          applyPreset();
-          renderApp();
-        };
-        strBtnContainer.appendChild(btn);
-      });
-
-      const selectPreset = document.getElementById('select-preset');
-      selectPreset.innerHTML = `
-        <option value="custom" ${state.preset === 'custom' ? 'selected' : ''}>カスタム設定</option>
-        <option value="standard" ${state.preset === 'standard' ? 'selected' : ''}>Standard (レギュラー)</option>
-        <option value="dropD" ${state.preset === 'dropD' ? 'selected' : ''}>Drop D</option>
-        <option value="halfStepDown" ${state.preset === 'halfStepDown' ? 'selected' : ''}>半音下げ</option>
-      `;
-      if (state.instrument === 'guitar') {
-        selectPreset.innerHTML += `
-          <option value="dmajor" ${state.preset === 'dmajor' ? 'selected' : ''}>D Major / Open D</option>
-          <option value="dsus4" ${state.preset === 'dsus4' ? 'selected' : ''}>Dsus4 / DADGAD</option>
-          <option value="openg" ${state.preset === 'openg' ? 'selected' : ''}>Open G</option>
-          <option value="openc" ${state.preset === 'openc' ? 'selected' : ''}>Open C</option>
-        `;
-      }
-
-      document.getElementById('label-capo-val').textContent = state.capo === 0 ? 'なし (0)' : `${state.capo} フレット`;
+      // Form Elements Sync
+      document.getElementById('select-preset').value = state.preset;
       document.getElementById('input-capo').value = state.capo;
+      document.getElementById('label-capo-val').textContent = state.capo === 0 ? 'なし (0f)' : `${state.capo} fret`;
 
-      document.getElementById('label-pressed-fret').textContent = state.pressedFret === 0 ? '開放 (0f)' : `${state.pressedFret} フレット押弦`;
       document.getElementById('input-pressed-fret').value = state.pressedFret;
+      document.getElementById('label-pressed-fret-val').textContent = state.pressedFret === 0 ? 'なし (開放)' : `${state.pressedFret} fret`;
 
       document.getElementById('select-string-type').value = state.stringType;
       document.getElementById('select-pick-type').value = state.pickType;
       document.getElementById('select-body-type').value = state.bodyType;
 
-      // Render Finger Count Buttons (0, 1, 2, 3)
+      document.getElementById('input-finger-width').value = state.fingerWidthMm;
+      document.getElementById('input-finger-pressure').value = state.fingerPressure;
+
+      // Render Multi-Finger Count Selector Buttons
       const fingerCountBox = document.getElementById('container-finger-count-buttons');
       fingerCountBox.innerHTML = '';
       [0, 1, 2, 3].forEach(cnt => {
@@ -1087,7 +1142,7 @@
         }
       }
 
-      // Strings List
+      // Strings List (音程・オクターブ・太さ/ゲージの自由カスタマイズ)
       const stringsContainer = document.getElementById('container-strings-tuning');
       stringsContainer.innerHTML = '';
       state.strings.forEach((str, idx) => {
@@ -1564,6 +1619,12 @@
     };
     document.getElementById('input-finger-pressure').onchange = () => playSelectedString();
 
+    document.getElementById('btn-reset-settings').onclick = () => {
+      if (confirm('すべての設定（チューニング・指の位置・弦の太さなど）をデフォルトに戻しますか？')) {
+        resetToDefaultSettings();
+      }
+    };
+
     document.getElementById('btn-strum-all').onclick = () => {
       const strumInterval = state.instrument === 'bass' ? 36 : 28;
       state.strings.forEach((str, sIdx) => {
@@ -1586,8 +1647,11 @@
       });
     };
 
-    // Initial Render & Start Canvas Animation Loop
-    applyPreset();
+    // Initial Load & Render
+    const hasLoaded = loadStateFromLocalStorage();
+    if (!hasLoaded || !state.strings || state.strings.length === 0) {
+      applyPreset();
+    }
     renderApp();
     requestAnimationFrame(drawCanvasStringWave);
   </script>
