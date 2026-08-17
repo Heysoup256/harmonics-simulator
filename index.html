@@ -1636,6 +1636,24 @@
       const clientX = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches.length > 0 ? e.touches[0].clientX : 0);
       const clientY = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches.length > 0 ? e.touches[0].clientY : 0);
 
+      // タップ／クリックされたY座標から対象の弦を常に最優先で正確に特定
+      const stringsContainer = document.getElementById('fret-strings-container');
+      if (stringsContainer && stringsContainer.children.length > 0) {
+        const strRows = stringsContainer.children;
+        let closestIdx = state.selectedStringIndex;
+        let minDiff = Infinity;
+        for (let sIdx = 0; sIdx < strRows.length; sIdx++) {
+          const strRect = strRows[sIdx].getBoundingClientRect();
+          const rowCenterY = (strRect.top + strRect.bottom) / 2;
+          const diff = Math.abs(clientY - rowCenterY);
+          if (diff < minDiff) {
+            minDiff = diff;
+            closestIdx = sIdx;
+          }
+        }
+        state.selectedStringIndex = closestIdx;
+      }
+
       const clickX = clientX - rect.left;
       let ratio = clickX / rect.width;
       if (ratio < 0) ratio = 0;
@@ -1652,59 +1670,28 @@
 
       // タップ操作（ピッキングまたはドラッグ開始）
       if (!isDragMove) {
-        // 指ハンドルの周辺をクリックしたかチェック（スマホでも掴みやすいよう閾値を 0.055 に拡大）
-        let clickedFingerIdx = -1;
-        if (state.fingerCount > 0) {
-          for (let fIdx = 0; fIdx < state.fingerCount; fIdx++) {
-            const fPos = state.fingerPositions[fIdx];
-            const absFret = state.capo + fPos;
-            const centerRatio = (1.0 - Math.pow(2, -absFret / 12.0));
-            if (Math.abs(ratio - centerRatio) < 0.055) {
-              clickedFingerIdx = fIdx;
-              break;
-            }
-          }
+        // カポ有効弦長（カポからブリッジまで）に対する相対ピッキング位置を計算
+        const capoRatio = state.capo > 0 ? (1.0 - Math.pow(2, -state.capo / 12.0)) : 0;
+        const effectiveRatio = Math.max(0.02, Math.min(0.99, (ratio - capoRatio) / (1.0 - capoRatio)));
+        state.pickPosRatio = effectiveRatio;
+
+        // ピッキング位置フラッシュラインを表示
+        const flashLine = document.getElementById('pluck-flash-line');
+        if (flashLine) {
+          flashLine.style.left = `${ratio * 100}%`;
+          flashLine.style.opacity = '1';
+          setTimeout(() => { flashLine.style.opacity = '0'; }, 220);
         }
 
-        if (clickedFingerIdx >= 0) {
-          state.draggingFingerIndex = clickedFingerIdx;
-        } else {
-          // タップされたY座標から対象の弦を正確に特定
-          const stringsContainer = document.getElementById('fret-strings-container');
-          if (stringsContainer) {
-            const strRows = stringsContainer.children;
-            for (let sIdx = 0; sIdx < strRows.length; sIdx++) {
-              const strRect = strRows[sIdx].getBoundingClientRect();
-              if (clientY >= strRect.top - 4 && clientY <= strRect.bottom + 4) {
-                state.selectedStringIndex = sIdx;
-                break;
-              }
-            }
-          }
-
-          // カポ有効弦長（カポからブリッジまで）に対する相対ピッキング位置を計算
-          const capoRatio = state.capo > 0 ? (1.0 - Math.pow(2, -state.capo / 12.0)) : 0;
-          const effectiveRatio = Math.max(0.02, Math.min(0.99, (ratio - capoRatio) / (1.0 - capoRatio)));
-          state.pickPosRatio = effectiveRatio;
-
-          // ピッキング位置フラッシュラインを表示
-          const flashLine = document.getElementById('pluck-flash-line');
-          if (flashLine) {
-            flashLine.style.left = `${ratio * 100}%`;
-            flashLine.style.opacity = '1';
-            setTimeout(() => { flashLine.style.opacity = '0'; }, 220);
-          }
-
-          // ピッキング位置表示ラベルをリアルタイム更新
-          const lastPluckLabel = document.getElementById('label-last-pluck-pos');
-          if (lastPluckLabel) {
-            const posDesc = effectiveRatio >= 0.82 ? 'ブリッジ寄り' : effectiveRatio <= 0.55 ? 'ネック寄り' : '中間位置';
-            lastPluckLabel.textContent = `ピッキング位置: ${posDesc} (${(effectiveRatio * 100).toFixed(0)}%)`;
-          }
-
-          // 単一の発音のみを確実にトリガー（2回再生バグを防止）
-          window.playString(state.selectedStringIndex);
+        // ピッキング位置表示ラベルをリアルタイム更新
+        const lastPluckLabel = document.getElementById('label-last-pluck-pos');
+        if (lastPluckLabel) {
+          const posDesc = effectiveRatio >= 0.82 ? 'ブリッジ寄り' : effectiveRatio <= 0.55 ? 'ネック寄り' : '中間位置';
+          lastPluckLabel.textContent = `ピッキング位置: ${posDesc} (${(effectiveRatio * 100).toFixed(0)}%)`;
         }
+
+        // 指マーク周辺かどうかに関わらず、タップされた弦を確実に発音！
+        window.playString(state.selectedStringIndex);
       }
     }
 
