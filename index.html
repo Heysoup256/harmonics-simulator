@@ -8,9 +8,30 @@
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
   <style>
     body { background-color: #0f172a; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; -webkit-tap-highlight-color: transparent; }
-    ::-webkit-scrollbar { height: 6px; width: 6px; }
-    ::-webkit-scrollbar-track { background: #1e293b; }
-    ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+    /* カスタムスクロールバー: スマホでも掴みやすく見やすいデザイン */
+    .fretboard-scroll-area {
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: auto;
+      scrollbar-color: #64748b #1e293b;
+    }
+    .fretboard-scroll-area::-webkit-scrollbar {
+      height: 10px;
+      width: 10px;
+    }
+    .fretboard-scroll-area::-webkit-scrollbar-track {
+      background: #0f172a;
+      border-radius: 6px;
+      border: 1px solid #334155;
+    }
+    .fretboard-scroll-area::-webkit-scrollbar-thumb {
+      background: #64748b;
+      border-radius: 6px;
+      border: 2px solid #0f172a;
+    }
+    .fretboard-scroll-area::-webkit-scrollbar-thumb:hover,
+    .fretboard-scroll-area::-webkit-scrollbar-thumb:active {
+      background: #fbbf24;
+    }
     .fret-wire {
       position: absolute;
       top: 0;
@@ -218,19 +239,35 @@
 
         <!-- Fretboard Area -->
         <div class="bg-slate-800 p-3 sm:p-5 rounded-2xl border border-slate-700 space-y-3 shadow-lg">
-          <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-1 text-xs sm:text-sm">
+          <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 text-xs sm:text-sm">
             <h3 class="font-semibold text-slate-200 flex items-center gap-1.5">
               <i class="fa-solid fa-grip-lines-vertical text-amber-400"></i> 指板 ＆ ピックアップ表示
             </h3>
-            <span id="label-last-pluck-pos" class="text-[11px] text-amber-300 font-mono font-bold">ピッキング位置: ブリッジ寄り (85%)</span>
+            <div class="flex items-center gap-1 text-[11px] font-mono">
+              <span id="label-last-pluck-pos" class="text-amber-300 font-bold mr-1">ピッキング位置: ブリッジ寄り (85%)</span>
+            </div>
           </div>
-          <p class="text-[11px] text-slate-400">
-            ※指マークをドラッグして位置を調整できます。各弦を直接タップするとその弦をその位置でピッキングします。<span class="sm:hidden text-amber-400/90 font-medium">（※左右にスワイプして24フレットまで確認可能）</span>
-          </p>
+
+          <!-- スマホ用 ポジションクイックジャンプボタンバー -->
+          <div class="flex items-center justify-between gap-1.5 bg-slate-900/90 p-1.5 rounded-xl border border-slate-700/60 text-xs">
+            <span class="text-[10px] text-slate-400 font-bold px-1 hidden sm:inline">表示位置:</span>
+            <div class="flex gap-1 w-full sm:w-auto">
+              <button id="btn-pos-nut" class="flex-1 sm:flex-initial px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 active:bg-amber-500 active:text-slate-950 text-slate-300 text-[11px] font-bold border border-slate-700 transition">
+                <i class="fa-solid fa-arrow-left text-[9px]"></i> 0-7f (ロー)
+              </button>
+              <button id="btn-pos-mid" class="flex-1 sm:flex-initial px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 active:bg-amber-500 active:text-slate-950 text-slate-300 text-[11px] font-bold border border-slate-700 transition">
+                7-15f (ミドル)
+              </button>
+              <button id="btn-pos-bridge" class="flex-1 sm:flex-initial px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 active:bg-amber-500 active:text-slate-950 text-slate-300 text-[11px] font-bold border border-slate-700 transition">
+                15-24f (ハイ) <i class="fa-solid fa-arrow-right text-[9px]"></i>
+              </button>
+            </div>
+            <span class="text-[10px] text-amber-400/90 font-mono hidden md:inline">※直接スワイプスクロールも可能</span>
+          </div>
 
           <!-- Fretboard Scroll Wrapper (スマホでもフレットが潰れず快適にスクロール・タップ可能) -->
-          <div class="w-full pb-2 pt-1 border border-slate-700/60 rounded-xl bg-slate-950 px-2 sm:px-4 overflow-x-auto">
-            <div id="fretboard-click-area" class="min-w-[780px] sm:min-w-full p-2 sm:p-3 relative select-none space-y-2 cursor-pointer touch-none">
+          <div id="fretboard-scroll-container" class="fretboard-scroll-area w-full pb-3 pt-1 border border-slate-700/60 rounded-xl bg-slate-950 px-2 sm:px-4 overflow-x-auto">
+            <div id="fretboard-click-area" class="min-w-[840px] sm:min-w-full p-2 sm:p-3 relative select-none space-y-2 cursor-pointer">
               
               <!-- Fret Numbers Header -->
               <div class="flex items-center font-mono text-[10px] text-slate-400 pointer-events-none">
@@ -1671,6 +1708,27 @@
       }
     }
 
+    // ポジションクイックジャンプボタン（スマホでもワンタップで目的のポジションへ瞬時に滑らかスクロール）
+    const scrollContainer = document.getElementById('fretboard-scroll-container');
+    const btnPosNut = document.getElementById('btn-pos-nut');
+    const btnPosMid = document.getElementById('btn-pos-mid');
+    const btnPosBridge = document.getElementById('btn-pos-bridge');
+
+    if (btnPosNut && scrollContainer) {
+      btnPosNut.onclick = () => scrollContainer.scrollTo({ left: 0, behavior: 'smooth' });
+    }
+    if (btnPosMid && scrollContainer) {
+      btnPosMid.onclick = () => {
+        const maxScroll = scrollContainer.scrollWidth - scrollContainer.clientWidth;
+        scrollContainer.scrollTo({ left: maxScroll * 0.42, behavior: 'smooth' });
+      };
+    }
+    if (btnPosBridge && scrollContainer) {
+      btnPosBridge.onclick = () => {
+        scrollContainer.scrollTo({ left: scrollContainer.scrollWidth, behavior: 'smooth' });
+      };
+    }
+
     // マウスイベント（タッチ直後の偽マウスイベントは無視）
     boardArea.addEventListener('mousedown', (e) => {
       if (Date.now() - lastTouchTimestamp < 600) return;
@@ -1690,26 +1748,69 @@
       }
     });
 
-    // タッチイベント（スマホ・タブレット完全対応）
+    // タッチイベント（滑らかな慣性横スクロールと確実な指ドラッグを完全両立）
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let isTouchDraggingFinger = false;
+
     boardArea.addEventListener('touchstart', (e) => {
       lastTouchTimestamp = Date.now();
-      if (e.touches.length > 0) {
-        handleBoardInteraction(e.touches[0], false);
+      if (e.touches.length === 0) return;
+      const touch = e.touches[0];
+      touchStartX = touch.clientX;
+      touchStartY = touch.clientY;
+      isTouchDraggingFinger = false;
+
+      // 指マーク（ドラッグハンドル）をタップしたか判定
+      const targetArea = document.getElementById('container-finger-bands-overlay') || boardArea;
+      const rect = targetArea.getBoundingClientRect();
+      const clickX = touch.clientX - rect.left;
+      let ratio = clickX / rect.width;
+      
+      let clickedFingerIdx = -1;
+      if (state.fingerCount > 0) {
+        for (let fIdx = 0; fIdx < state.fingerCount; fIdx++) {
+          const fPos = state.fingerPositions[fIdx];
+          const absFret = state.capo + fPos;
+          const centerRatio = (1.0 - Math.pow(2, -absFret / 12.0));
+          if (Math.abs(ratio - centerRatio) < 0.055) {
+            clickedFingerIdx = fIdx;
+            break;
+          }
+        }
       }
-    }, { passive: true });
+
+      if (clickedFingerIdx >= 0) {
+        state.draggingFingerIndex = clickedFingerIdx;
+        isTouchDraggingFinger = true;
+        // 指ドラッグ中のみブラウザスクロールを一時停止
+        if (e.cancelable) e.preventDefault();
+      }
+    }, { passive: false });
 
     window.addEventListener('touchmove', (e) => {
-      if (state.draggingFingerIndex >= 0 && e.touches.length > 0) {
+      if (isTouchDraggingFinger && state.draggingFingerIndex >= 0 && e.touches.length > 0) {
         lastTouchTimestamp = Date.now();
+        if (e.cancelable) e.preventDefault();
         handleBoardInteraction(e.touches[0], true);
       }
-    }, { passive: true });
+    }, { passive: false });
 
-    window.addEventListener('touchend', () => {
-      if (state.draggingFingerIndex >= 0) {
+    window.addEventListener('touchend', (e) => {
+      if (isTouchDraggingFinger && state.draggingFingerIndex >= 0) {
         lastTouchTimestamp = Date.now();
         state.draggingFingerIndex = -1;
+        isTouchDraggingFinger = false;
         playSelectedString();
+      } else if (!isTouchDraggingFinger) {
+        // 指ドラッグ以外の静止タップ（スワイプ移動距離 8px 未満）のみピッキングを発動
+        const touch = e.changedTouches && e.changedTouches.length > 0 ? e.changedTouches[0] : null;
+        if (touch) {
+          const dist = Math.hypot(touch.clientX - touchStartX, touch.clientY - touchStartY);
+          if (dist < 8) {
+            handleBoardInteraction(touch, false);
+          }
+        }
       }
     });
 
