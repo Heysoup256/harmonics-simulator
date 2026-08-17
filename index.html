@@ -631,19 +631,19 @@
                                 ((x1 / 2.0) - Math.sin(2.0 * kn * x1) / (4.0 * kn));
             const energyOverlap = Math.max(0, Math.min(1.0, integralVal / effectiveW));
 
-            // 弦の線密度慣性力: μ ∝ d² → 慣性抵抗 ∝ gaugeFactor^1.60
-            const inertiaResistance = Math.pow(gaugeFactor, 1.60);
+            // 弦の線密度慣性力: 時間領域の減衰持続には μ ∝ d² が効く
+            const inertiaResistance = Math.pow(gaugeFactor, 1.40);
 
             // 時間領域減衰率 γ_finger [1/s]: sin² 依存（エネルギー散逸物理）
-            const fingerDamping = (skinNonlinearFactor * energyOverlap * 350.0) / inertiaResistance;
+            const fingerDamping = (skinNonlinearFactor * energyOverlap * 420.0) / inertiaResistance;
             totalFingerDampingRate += fingerDamping;
 
             // 初期励起境界拘束（Initial Excitation Boundary Constraint）:
-            // 指が弦に接触している状態でピッキングすると、弦の初期変位形状が
-            // u(x_touch) ≈ 0 の境界条件に拘束される。
-            // モード n の初期振幅 A_n(0) は接触点での変位 |sin(kn·x_touch)| に比例して抑制される。
-            const constraintStrength = (skinNonlinearFactor * pointAmplitude * 350.0) / inertiaResistance;
-            const modeClamp = Math.exp(-constraintStrength * 0.042);
+            // 指が弦に接触している状態でピッキングすると、弦の初期変位形状が u(x_touch) ≈ 0 の境界条件に拘束される。
+            // 境界拘束力は質量よりも指皮膚の変位抵抗が支配的（gaugeFactor^0.60）。
+            // 特性時間 τ_c = 0.095: 接触点での変位 |sin(kn·x_touch)| が大きいモード（腹・非ノード倍音）は初期励起そのものが指数関数的に消滅する。
+            const constraintStrength = (skinNonlinearFactor * pointAmplitude * 420.0) / Math.pow(gaugeFactor, 0.60);
+            const modeClamp = Math.exp(-constraintStrength * 0.095);
             modalExcitationFactor *= modeClamp;
           }
         }
@@ -689,7 +689,7 @@
 
         let audibleDurationSec;
         if (state.touchRelease && activeFingerCount > 0) {
-          if (survivalFactorAtRelease > 0.01 && modalExcitationFactor > 0.04) {
+          if (survivalFactorAtRelease > 0.02 && modalExcitationFactor > 0.12) {
             // 生き残った純粋なハーモニクス倍音: 指離脱後は naturalGamma でロングサステイン
             const postReleaseSec = Math.max(0.15, Math.log(survivalFactorAtRelease / 0.0001) / naturalGamma);
             audibleDurationSec = releaseTimeSec + postReleaseSec;
