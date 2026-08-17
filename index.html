@@ -123,7 +123,7 @@
 
           <div class="space-y-1">
             <label class="text-xs text-slate-300 font-medium block">ピックアップ選択</label>
-            <select id="select-pickup-type" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-amber-300 font-medium focus:outline-none focus:border-amber-400">
+            <select id="select-pickup-type" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-amber-400">
               <option value="both">センター / ミックス (Neck + Bridge)</option>
               <option value="neck">フロント (Neck PU: 甘く太いトーン)</option>
               <option value="bridge">リア (Bridge PU: 鋭くエッジの効いたトーン)</option>
@@ -1248,6 +1248,12 @@
         pickPosLabel.textContent = state.pickPosRatio >= 0.88 ? 'ブリッジ至近' : state.pickPosRatio <= 0.75 ? 'ネック寄り' : '標準位置';
       }
 
+      const lastPluckLabel = document.getElementById('label-last-pluck-pos');
+      if (lastPluckLabel) {
+        const posDesc = state.pickPosRatio >= 0.82 ? 'ブリッジ寄り' : state.pickPosRatio <= 0.55 ? 'ネック寄り' : '中間位置';
+        lastPluckLabel.textContent = `ピッキング位置: ${posDesc} (${(state.pickPosRatio * 100).toFixed(0)}%)`;
+      }
+
       renderFretboard();
       renderSpectrumAnalyzer();
     }
@@ -1321,17 +1327,18 @@
         }
       }
 
-      // Pickups & Bridge Areas (Neck PU @ 82%, Bridge PU @ 90%, Bridge @ 100%) - インタラクティブ切替可能
+      // Pickups & Bridge Areas (Neck PU @ 82%, Bridge PU @ 90%, Bridge @ 100%)
+      // ピックアップは弦の下側（背面レイヤー z-0）に配置し、弦が手前を通過するリアルな構造
       const isNeckActive = state.pickupType === 'neck' || state.pickupType === 'both';
       const isBridgeActive = state.pickupType === 'bridge' || state.pickupType === 'both';
 
       const neckPu = document.createElement('div');
-      neckPu.className = `absolute top-0 bottom-0 w-4 border rounded z-20 -translate-x-1/2 flex items-center justify-center cursor-pointer transition-all duration-200 ${
-        isNeckActive ? 'bg-amber-500/30 border-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.6)]' : 'bg-slate-800 border-slate-700 opacity-60 hover:opacity-90'
+      neckPu.className = `absolute top-0 bottom-0 w-4 border rounded z-0 -translate-x-1/2 flex items-center justify-center pointer-events-auto cursor-pointer transition-all duration-200 ${
+        isNeckActive ? 'bg-amber-500/25 border-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.5)]' : 'bg-slate-950/80 border-slate-700/80 opacity-50 hover:opacity-80'
       }`;
       neckPu.style.left = '82%';
       neckPu.title = 'フロント (Neck Pickup) - クリックで切替';
-      neckPu.innerHTML = '<div class="w-1 h-3/4 bg-slate-400 rounded-full"></div>';
+      neckPu.innerHTML = '<div class="w-1.5 h-3/4 bg-slate-500 rounded-full border border-slate-600"></div>';
       neckPu.onclick = (e) => {
         e.stopPropagation();
         state.pickupType = state.pickupType === 'neck' ? 'both' : (state.pickupType === 'both' ? 'bridge' : 'neck');
@@ -1341,11 +1348,12 @@
       inlaysContainer.appendChild(neckPu);
 
       const bridgePu = document.createElement('div');
-      bridgePu.className = `absolute top-0 bottom-0 w-4 border rounded z-20 -translate-x-1/2 flex items-center justify-center cursor-pointer transition-all duration-200 ${
-        isBridgeActive ? 'bg-amber-500/30 border-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.6)]' : 'bg-slate-800 border-slate-700 opacity-60 hover:opacity-90'
+      bridgePu.className = `absolute top-0 bottom-0 w-4 border rounded z-0 -translate-x-1/2 flex items-center justify-center pointer-events-auto cursor-pointer transition-all duration-200 ${
+        isBridgeActive ? 'bg-amber-500/25 border-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.5)]' : 'bg-slate-950/80 border-slate-700/80 opacity-50 hover:opacity-80'
       }`;
       bridgePu.style.left = '90%';
       bridgePu.title = 'リア (Bridge Pickup) - クリックで切替';
+      bridgePu.innerHTML = '<div class="w-1.5 h-3/4 bg-slate-500 rounded-full border border-slate-600"></div>';
       bridgePu.onclick = (e) => {
         e.stopPropagation();
         state.pickupType = state.pickupType === 'bridge' ? 'both' : (state.pickupType === 'both' ? 'neck' : 'bridge');
@@ -1355,7 +1363,7 @@
       inlaysContainer.appendChild(bridgePu);
 
       const bridgeVal = document.createElement('div');
-      bridgeVal.className = 'absolute top-0 bottom-0 w-2.5 bg-slate-500 border border-slate-400 z-10 -translate-x-1/2 rounded-r';
+      bridgeVal.className = 'absolute top-0 bottom-0 w-2.5 bg-slate-500 border border-slate-400 z-0 -translate-x-1/2 rounded-r';
       bridgeVal.style.left = '100%';
       inlaysContainer.appendChild(bridgeVal);
 
@@ -1601,6 +1609,13 @@
             flashLine.style.left = `${ratio * 100}%`;
             flashLine.style.opacity = '1';
             setTimeout(() => { flashLine.style.opacity = '0'; }, 220);
+          }
+
+          // ピッキング位置表示ラベルをリアルタイム更新
+          const lastPluckLabel = document.getElementById('label-last-pluck-pos');
+          if (lastPluckLabel) {
+            const posDesc = effectiveRatio >= 0.82 ? 'ブリッジ寄り' : effectiveRatio <= 0.55 ? 'ネック寄り' : '中間位置';
+            lastPluckLabel.textContent = `ピッキング位置: ${posDesc} (${(effectiveRatio * 100).toFixed(0)}%)`;
           }
 
           window.playString(state.selectedStringIndex);
