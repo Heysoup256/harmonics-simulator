@@ -418,11 +418,13 @@
       // ピッキングツールの有限接触幅 (爪:2mm, ピック:5mm, 指:12mm)
       const pluckWidth = pickType === 'nail' ? 0.002 : pickType === 'pick' ? 0.005 : 0.012;
 
-      // 弦の物理的損失係数（空気抵抗 + 弦内部粘弾性曲げ摩擦 + ブリッジ音響放射）
-      const baseGamma = instrumentType === 'bass' ? 0.95 : (stringType === 'nylon' ? 1.8 : stringType === 'acoustic' ? 1.3 : 1.45);
-      const massFactor = instrumentType === 'bass' ? Math.pow(gaugeFactor, -0.22) : Math.pow(gaugeFactor, -0.10);
+      // 弦の基礎物理損失（空気抵抗摩擦 + ブリッジ音響放射）
+      // 物理法則: 線密度 μ (gaugeFactor) が大きいほど、空気抵抗損失 gamma_air は低下しサステインが伸びる
+      const bodyRadiationGamma = stringType === 'acoustic' ? 0.32 : stringType === 'nylon' ? 0.45 : 0.22;
+      const airLossBase = instrumentType === 'bass' ? 0.48 : (stringType === 'nylon' ? 0.95 : 0.70);
+      const massAirFactor = Math.pow(gaugeFactor, -0.32);
 
-      // ⑤ 皮膚の非線形粘弾性（Kelvin-Voigt Skin Model）: 指圧と接触の非線形吸収
+      // 皮膚の非線形粘弾性（Kelvin-Voigt Skin Model）
       const skinNonlinearFactor = Math.pow(fingerPressure, 1.25) * (1.0 + 0.45 * fingerPressure);
 
       const harmonics = [];
@@ -464,11 +466,14 @@
         // 初期励起振幅
         const baseInitialAmp = (0.75 / Math.pow(n, alpha)) * pickExcitation;
 
-        // 弦固有の物理減衰率 gamma_n [1/sec]
-        const naturalGamma = (baseGamma * massFactor * Math.sqrt(n)) + (0.018 * Math.pow(n, 1.4));
+        // 弦固有の厳密な物理減衰率 gamma_n [1/sec]:
+        // gamma_n = gamma_air (質量とモード平方根依存) + gamma_visco (内部曲げヒステリシス n^1.35) + gamma_bridge
+        const gammaAir = airLossBase * massAirFactor * Math.sqrt(n);
+        const gammaVisco = 0.012 * Math.pow(n, 1.35);
+        const naturalGamma = gammaAir + gammaVisco + bodyRadiationGamma;
         const totalGamma = naturalGamma + totalFingerDampingRate;
 
-        // 可聴限界(-80dB)までの到達時間
+        // 可聴限界(-80dB)までの物理到達時間 T_audible = ln(10000) / totalGamma = 9.21 / totalGamma
         const audibleDurationSec = 9.21 / totalGamma;
 
         // 100ms後の残存エネルギー（UI表示・支配的倍音判定用）
@@ -642,12 +647,11 @@
       const gaugeMm  = modalData.gaugeMm;
       const gaugeFactor = gaugeMm / 0.23;
 
-      // 弦楽器本来の自然なサステイン（ギター：最大4.2秒、ベース：最大5.8秒）
+      // 全倍音中の最長物理到達時間を特定 (人為的制限は完全撤廃し、物理方程式に従う)
       let longestDecay = 0.05;
       modalData.harmonics.forEach(h => {
         if (h.decayTimeSec > longestDecay) longestDecay = h.decayTimeSec;
       });
-      const maxDecaySec = Math.min(isBass ? 5.8 : 4.2, longestDecay * 0.95);
 
       // ---- アタックタイム (指やピックの弦離れ解放時間 1.5〜3.5ms) ----
       let attackMs;
@@ -720,7 +724,8 @@
         collSource.stop(now + fretCollisionDur);
       }
 
-      // ---- 弦のモード物理合成（①張力変動 + ②2次元偏光 + 減衰） ----
+      // ---- 弦のモード物理合成（①張力変動 + ②2次元偏光 + 物理減衰） ----
+      // 人為的カットは一切行わず、各モードの物理減衰率 gamma_n に完全追従
       modalData.harmonics.forEach((h, idx) => {
         if (h.initialAmp < 0.0001) return;
 
@@ -732,12 +737,12 @@
         }
 
         const peak = Math.min(0.92, h.initialAmp * massBoost * 1.20);
-        const hDecay = Math.min(maxDecaySec, Math.max(0.020, h.decayTimeSec));
+        const hDecay = Math.max(0.020, h.decayTimeSec);
 
         // ① 非線形張力変動ピッチグライド
         const startFreq = h.freq * Math.pow(2, (tensionGlideCents / Math.sqrt(h.n)) / 1200.0);
 
-        // ②-A 垂直偏光モード (Vertical)
+        // ②-A 垂直偏光モード (Vertical: ボディへエネルギー放射)
         const oscV = ctx.createOscillator();
         const gainV = ctx.createGain();
         oscV.type = 'sine';
@@ -771,8 +776,8 @@
         oscH.stop(now + hDecay + 0.1);
       });
 
-      // ---- クリーンアップ ----
-      const lifetimeSec = maxDecaySec + 1.0;
+      // ---- クリーンアップ (最長倍音が自然消滅した後に廃棄) ----
+      const lifetimeSec = longestDecay + 1.0;
       setTimeout(() => {
         try {
           masterGain.disconnect();
