@@ -634,8 +634,10 @@
             // ハイブリッド接触係数: 点接触振幅を主体に、有限幅補正で下限を設定
             const overlapFactor = Math.max(widthCorrection, pointAmplitude);
             
-            // 物理力学: 弦の線密度慣性力（太い弦ほど倍音が持続）と指の皮膚粘弾性抵抗（350/s）
-            const inertiaResistance = Math.pow(gaugeFactor, 0.70);
+            // 物理力学: 弦の線密度慣性力と指の皮膚粘弾性抵抗（350/s）
+            // 弦の線密度 μ ∝ d² なので慣性抵抗は gaugeFactor^1.60 に比例
+            // 6弦(0.46mm): inertiaResistance ≈ 3.03, 1弦(0.23mm): 1.0
+            const inertiaResistance = Math.pow(gaugeFactor, 1.60);
             const fingerDamping = (skinNonlinearFactor * overlapFactor * 350.0) / inertiaResistance;
             totalFingerDampingRate += fingerDamping;
 
@@ -669,11 +671,12 @@
         const baseInitialAmp = (0.75 / Math.pow(n, alpha)) * pickExcitation * puMultiplier * modalExcitationFactor;
 
         // 弦固有の厳密な物理減衰率 gamma_n [1/sec]:
-        // 短波長（高次倍音 n）の曲げ剛性内部ヒステリシス損 ∝ n^1.85
-        // 細い弦（1弦など）ほど表面積/質量比が大きく空気減衰が急峻
+        // 空気摩擦: 細い弦ほど表面積/質量比が大きく急峻に減衰
         const stringThinnessFactor = Math.pow(0.23 / gaugeMm, 0.60);
         const gammaAir = airLossBase * massAirFactor * Math.sqrt(n) * stringThinnessFactor;
-        const gammaVisco = 0.028 * Math.pow(n, 1.85) * stringThinnessFactor;
+        // 内部曲げヒステリシス損 ∝ n^1.85: 太い弦ほど曲げ剛性が大きくわずかに損失増
+        const bendStiffnessFactor = Math.pow(gaugeFactor, 0.30);
+        const gammaVisco = 0.028 * Math.pow(n, 1.85) * bendStiffnessFactor;
         const naturalGamma = gammaAir + gammaVisco + bodyRadiationGamma;
         const totalGamma = naturalGamma + totalFingerDampingRate;
 
