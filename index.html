@@ -659,15 +659,30 @@
         const naturalGamma = gammaAir + gammaVisco + bodyRadiationGamma;
         const totalGamma = naturalGamma + totalFingerDampingRate;
 
-        // 指離脱（Touch-and-Release）の物理: 弾いた直後に指を離すと、指の摩擦抵抗が消滅しサステインが伸びる
-        const effectiveFingerDampingForDuration = state.touchRelease ? (totalFingerDampingRate * 0.10) : totalFingerDampingRate;
-        const totalGammaForDuration = naturalGamma + effectiveFingerDampingForDuration;
+        // 指離脱（Touch-and-Release）の厳密物理:
+        // ピッキング直後の接触選別フェーズ（t = 0〜100ms）において、
+        // 不要な倍音（指の接触位置で振幅を持つモード）は指の強力な粘弾性摩擦により20〜60msで完全に消滅する。
+        // 生き残った倍音（ノード上のハーモニクス）のみが、100ms後の指離脱により naturalGamma（開放弦の自然減衰）で持続する。
+        const releaseTimeSec = 0.100; // 選別時間（100ms）
+        const survivalFactorAtRelease = Math.exp(-totalGamma * releaseTimeSec);
 
-        // 可聴限界(-80dB)までの物理到達時間 T_audible = 9.21 / gamma
-        const audibleDurationSec = 9.21 / totalGammaForDuration;
+        let audibleDurationSec;
+        if (state.touchRelease && activeFingerCount > 0) {
+          if (survivalFactorAtRelease > 0.02) {
+            // 生き残ったハーモニクス倍音: 指離脱後は naturalGamma でロングサステイン
+            const postReleaseSec = Math.max(0.2, Math.log(survivalFactorAtRelease / 0.0001) / naturalGamma);
+            audibleDurationSec = releaseTimeSec + postReleaseSec;
+          } else {
+            // 不要な倍音: 指離脱前に完全に死滅（開放弦の音が残らないよう瞬時にカット）
+            audibleDurationSec = Math.min(releaseTimeSec, 9.21 / totalGamma);
+          }
+        } else {
+          // 指を置いたまま: totalGamma で減衰継続
+          audibleDurationSec = 9.21 / totalGamma;
+        }
 
         // 100ms後の残存エネルギー（UI表示・支配的倍音判定用）
-        const energyAtAudible = baseInitialAmp * Math.exp(-totalGamma * 0.10);
+        const energyAtAudible = baseInitialAmp * survivalFactorAtRelease;
         totalSurvivingEnergy += energyAtAudible;
 
         // ============================================================
@@ -965,6 +980,10 @@
         // ① 非線形張力変動ピッチグライド
         const startFreq = h.freq * Math.pow(2, (tensionGlideCents / Math.sqrt(h.n)) / 1200.0);
 
+        // タッチ＆リリースの2フェーズ音量エンベロープ（接触選別100ms → 離脱自然減衰）
+        const releaseTimeSec = 0.100;
+        const ampAtRelease = Math.max(0.0001, peak * Math.exp(-h.totalDampingRate * releaseTimeSec));
+
         // ②-A 垂直偏光モード (Vertical: ボディへエネルギー放射)
         const oscV = ctx.createOscillator();
         const gainV = ctx.createGain();
@@ -974,7 +993,12 @@
 
         gainV.gain.setValueAtTime(0.00001, now);
         gainV.gain.linearRampToValueAtTime(peak * 0.65, now + attackTime);
-        gainV.gain.exponentialRampToValueAtTime(0.0001, now + hDecay * 0.9);
+        if (state.touchRelease && state.fingerCount > 0 && hDecay > releaseTimeSec) {
+          gainV.gain.exponentialRampToValueAtTime(ampAtRelease * 0.65, now + releaseTimeSec);
+          gainV.gain.exponentialRampToValueAtTime(0.0001, now + hDecay * 0.9);
+        } else {
+          gainV.gain.exponentialRampToValueAtTime(0.0001, now + hDecay * 0.9);
+        }
 
         oscV.connect(gainV);
         gainV.connect(masterGain);
@@ -991,7 +1015,12 @@
 
         gainH.gain.setValueAtTime(0.00001, now);
         gainH.gain.linearRampToValueAtTime(peak * 0.35, now + attackTime * 1.3);
-        gainH.gain.exponentialRampToValueAtTime(0.0001, now + hDecay);
+        if (state.touchRelease && state.fingerCount > 0 && hDecay > releaseTimeSec) {
+          gainH.gain.exponentialRampToValueAtTime(ampAtRelease * 0.35, now + releaseTimeSec);
+          gainH.gain.exponentialRampToValueAtTime(0.0001, now + hDecay);
+        } else {
+          gainH.gain.exponentialRampToValueAtTime(0.0001, now + hDecay);
+        }
 
         oscH.connect(gainH);
         gainH.connect(masterGain);
