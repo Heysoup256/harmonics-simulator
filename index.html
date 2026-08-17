@@ -650,10 +650,12 @@
         }
 
         // ピッキング位置の物理励起 (有限接触幅のsinc平滑化)
+        // 残留結合フロア: 実際のピッキングは点接触ではなく有限幅の接触領域を持つため、
+        // ピック位置がモードの節に当たっても完全にゼロにはならない
         const sincArg = (kn * pluckWidth) / 2.0;
         const sincVal = sincArg === 0 ? 1.0 : Math.sin(sincArg) / sincArg;
         const rawExcitation = Math.sin(kn * x_pick) * sincVal;
-        const pickExcitation = Math.abs(rawExcitation);
+        const pickExcitation = Math.sqrt(rawExcitation * rawExcitation + 0.008);
 
         // 電磁気ピックアップ伝達関数（ファラデーの法則 × コームフィルター）
         let pickupSensitivity = 1.0;
@@ -965,14 +967,14 @@
       const pluckSampleCount = Math.floor(ctx.sampleRate * pluckTransientDur);
       const pluckBuf = ctx.createBuffer(1, pluckSampleCount, ctx.sampleRate);
       const pluckData = pluckBuf.getChannelData(0);
-      const decayRate = state.pickType === 'flesh' ? 24.0 : 36.0;
+      const decayRate = state.pickType === 'flesh' ? 18.0 : 28.0;
       
       for (let i = 0; i < pluckSampleCount; i++) {
         const t = i / pluckSampleCount;
         const env = Math.exp(-t * decayRate);
         const noise = (Math.random() * 2.0 - 1.0) * env;
-        const bodyThump = Math.sin(2.0 * Math.PI * (isBass ? 180.0 : 320.0) * (i / ctx.sampleRate)) * env * 0.6;
-        pluckData[i] = (noise + bodyThump) * 0.28 * Math.pow(gaugeFactor, 0.40);
+        const bodyThump = Math.sin(2.0 * Math.PI * (isBass ? 150.0 : 280.0) * (i / ctx.sampleRate)) * env * 0.5;
+        pluckData[i] = (noise + bodyThump) * 0.65 * Math.pow(gaugeFactor, 0.35);
       }
       
       const pluckSource = ctx.createBufferSource();
@@ -981,18 +983,18 @@
       const pluckFilter = ctx.createBiquadFilter();
       if (state.pickType === 'nail') {
         pluckFilter.type = 'highpass';
-        pluckFilter.frequency.setValueAtTime(isBass ? 2500 : 3800, now);
+        pluckFilter.frequency.setValueAtTime(isBass ? 2200 : 3200, now);
       } else if (state.pickType === 'pick') {
         pluckFilter.type = 'bandpass';
-        pluckFilter.frequency.setValueAtTime(isBass ? 1600 : 2800, now);
-        pluckFilter.Q.setValueAtTime(1.2, now);
+        pluckFilter.frequency.setValueAtTime(isBass ? 1200 : 2200, now);
+        pluckFilter.Q.setValueAtTime(0.8, now);
       } else {
         pluckFilter.type = 'lowpass';
-        pluckFilter.frequency.setValueAtTime(isBass ? 700 : 1200, now);
+        pluckFilter.frequency.setValueAtTime(isBass ? 900 : 1600, now);
       }
 
       const pluckGain = ctx.createGain();
-      pluckGain.gain.setValueAtTime(0.045, now);
+      pluckGain.gain.setValueAtTime(0.14, now);
 
       pluckSource.connect(pluckFilter);
       pluckFilter.connect(pluckGain);
