@@ -615,14 +615,24 @@
             const touchFretDist = Math.max(0.005, barreFretRel - pressedFret);
             const x_touch = L_prime * (1.0 - Math.pow(2, -touchFretDist / 12.0));
 
+            // 点接触振幅近似（Point-Contact Amplitude Approximation）:
+            // 指の皮膚が弦に加える制動力は、接触点における弦の瞬時変位振幅に比例する。
+            // 節（ノード: sin=0）では弦の変位がゼロのため指が反力を受けず倍音は透過する。
+            // 腹（アンチノード: sin=1）では弦の変位が最大のため最大の制動力を受ける。
+            const pointAmplitude = Math.abs(Math.sin(kn * x_touch));
+
+            // 指の有限接触幅による補正:
+            // 指の皮膚は点ではなく幅 w を持つ。節点の直上であっても、指の端が節の隣の山に
+            // わずかにかかるため、完全にゼロにはならない。
             const x1 = Math.max(0, x_touch - w / 2.0);
             const x2 = Math.min(L_prime, x_touch + w / 2.0);
             const effectiveW = Math.max(0.00005, x2 - x1);
-
             const integralVal = ((x2 / 2.0) - Math.sin(2.0 * kn * x2) / (4.0 * kn)) - 
                                 ((x1 / 2.0) - Math.sin(2.0 * kn * x1) / (4.0 * kn));
-            
-            const overlapFactor = Math.max(0, Math.min(1.0, integralVal / effectiveW));
+            const widthCorrection = Math.max(0, Math.min(1.0, integralVal / effectiveW));
+
+            // ハイブリッド接触係数: 点接触振幅を主体に、有限幅補正で下限を設定
+            const overlapFactor = Math.max(widthCorrection, pointAmplitude);
             
             // 物理力学: 弦の線密度慣性力（太い弦ほど倍音が持続）と指の皮膚粘弾性抵抗（350/s）
             const inertiaResistance = Math.pow(gaugeFactor, 0.70);
@@ -630,8 +640,8 @@
             totalFingerDampingRate += fingerDamping;
 
             // 指数関数的モード初期抑制（Exponential Modal Clamp）:
-            // 指が触れているモード（overlapFactor > 0）は、初期励起（アタック）の瞬間から指数関数的にエネルギーを奪われる。
-            // 2フレット（9倍音ノード）の場合、基音（overlap ≈ 0.117）は exp(-350*0.117*0.040) = exp(-1.64) → さらに多重積算で完全に無音化される。
+            // 指が触れているモード（overlapFactor > 0）は、初期励起の瞬間から
+            // 指数関数的にエネルギーを奪われる。減衰率が大きいモードほど強く抑制される。
             const modeClamp = Math.exp(-fingerDamping * 0.042);
             modalExcitationFactor *= modeClamp;
           }
@@ -652,7 +662,7 @@
         } else if (pickupType === 'both') {
           pickupSensitivity = (Math.abs(Math.sin(kn * x_pu_neck)) + Math.abs(Math.sin(kn * x_pu_bridge))) / 2.0;
         }
-        pickupSensitivity = Math.max(0.08, pickupSensitivity);
+        pickupSensitivity = Math.max(0.004, pickupSensitivity);
 
         // 初期励起振幅: 厳密な物理積算値
         const puMultiplier = pickupType === 'piezo' ? 1.0 : (pickupSensitivity * 1.18);
