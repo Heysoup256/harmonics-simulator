@@ -629,8 +629,10 @@
             const fingerDamping = (skinNonlinearFactor * overlapFactor * 350.0) / inertiaResistance;
             totalFingerDampingRate += fingerDamping;
 
-            // 初期励起時のモード振幅クランプ: 指の皮膚が接触している位置で振幅を持つモードは初期励起そのものが物理的に抑制される
-            const modeClamp = Math.max(0.001, 1.0 - Math.pow(overlapFactor, 0.85) * (1.0 - Math.exp(-fingerPressure * 2.5)));
+            // 指数関数的モード初期抑制（Exponential Modal Clamp）:
+            // 指が触れているモード（overlapFactor > 0）は、初期励起（アタック）の瞬間から指数関数的にエネルギーを奪われる。
+            // 2フレット（9倍音ノード）の場合、基音（overlap ≈ 0.117）は exp(-350*0.117*0.040) = exp(-1.64) → さらに多重積算で完全に無音化される。
+            const modeClamp = Math.exp(-fingerDamping * 0.042);
             modalExcitationFactor *= modeClamp;
           }
         }
@@ -674,7 +676,7 @@
 
         let audibleDurationSec;
         if (state.touchRelease && activeFingerCount > 0) {
-          if (survivalFactorAtRelease > 0.02 && modalExcitationFactor > 0.10) {
+          if (survivalFactorAtRelease > 0.01 && modalExcitationFactor > 0.04) {
             // 生き残った純粋なハーモニクス倍音: 指離脱後は naturalGamma でロングサステイン
             const postReleaseSec = Math.max(0.15, Math.log(survivalFactorAtRelease / 0.0001) / naturalGamma);
             audibleDurationSec = releaseTimeSec + postReleaseSec;
