@@ -71,7 +71,7 @@
             <div id="string-count-buttons" class="flex gap-1"></div>
           </div>
 
-          <select id="select-preset" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-amber-300 font-medium focus:outline-none focus:border-amber-400">
+          <select id="select-preset" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-amber-400">
           </select>
 
           <!-- Capo Slider -->
@@ -346,10 +346,113 @@
       
       selectedStringIndex: 0,
       strings: [],
-      
       waveTime: 0,
-    draggingFingerIndex: -1
+      draggingFingerIndex: -1
     };
+
+    const PRESETS = {
+      guitar: {
+        6: [
+          { id: 'standard', name: 'レギュラー / Standard (E A D G B E)', strings: [{note: 'E', octave: 4}, {note: 'B', octave: 3}, {note: 'G', octave: 3}, {note: 'D', octave: 3}, {note: 'A', octave: 2}, {note: 'E', octave: 2}] },
+          { id: 'drop_d', name: 'ドロップD / Drop D (D A D G B E)', strings: [{note: 'E', octave: 4}, {note: 'B', octave: 3}, {note: 'G', octave: 3}, {note: 'D', octave: 3}, {note: 'A', octave: 2}, {note: 'D', octave: 2}] },
+          { id: 'half_step', name: '半音下げ / Half Step Down (Eb Ab Db Gb Bb Eb)', strings: [{note: 'D#', octave: 4}, {note: 'A#', octave: 3}, {note: 'F#', octave: 3}, {note: 'C#', octave: 3}, {note: 'G#', octave: 2}, {note: 'D#', octave: 2}] },
+          { id: 'dadgad', name: 'DADGAD (D A D G A D)', strings: [{note: 'D', octave: 4}, {note: 'A', octave: 3}, {note: 'G', octave: 3}, {note: 'D', octave: 3}, {note: 'A', octave: 2}, {note: 'D', octave: 2}] },
+          { id: 'open_d', name: 'オープンD / Open D (D A D F# A D)', strings: [{note: 'D', octave: 4}, {note: 'A', octave: 3}, {note: 'F#', octave: 3}, {note: 'D', octave: 3}, {note: 'A', octave: 2}, {note: 'D', octave: 2}] },
+          { id: 'open_g', name: 'オープンG / Open G (D G D G B D)', strings: [{note: 'D', octave: 4}, {note: 'B', octave: 3}, {note: 'G', octave: 3}, {note: 'D', octave: 3}, {note: 'G', octave: 2}, {note: 'D', octave: 2}] },
+          { id: 'custom', name: 'カスタム (手動チューニング)' }
+        ],
+        7: [
+          { id: 'standard', name: '7弦 レギュラー (B E A D G B E)', strings: [{note: 'E', octave: 4}, {note: 'B', octave: 3}, {note: 'G', octave: 3}, {note: 'D', octave: 3}, {note: 'A', octave: 2}, {note: 'E', octave: 2}, {note: 'B', octave: 1}] },
+          { id: 'drop_a', name: '7弦 ドロップA (A E A D G B E)', strings: [{note: 'E', octave: 4}, {note: 'B', octave: 3}, {note: 'G', octave: 3}, {note: 'D', octave: 3}, {note: 'A', octave: 2}, {note: 'E', octave: 2}, {note: 'A', octave: 1}] },
+          { id: 'custom', name: 'カスタム (手動チューニング)' }
+        ]
+      },
+      bass: {
+        4: [
+          { id: 'standard', name: '4弦 レギュラー (E A D G)', strings: [{note: 'G', octave: 2}, {note: 'D', octave: 2}, {note: 'A', octave: 1}, {note: 'E', octave: 1}] },
+          { id: 'drop_d', name: '4弦 ドロップD (D A D G)', strings: [{note: 'G', octave: 2}, {note: 'D', octave: 2}, {note: 'A', octave: 1}, {note: 'D', octave: 1}] },
+          { id: 'half_step', name: '4弦 半音下げ (Eb Ab Db Gb)', strings: [{note: 'F#', octave: 2}, {note: 'C#', octave: 2}, {note: 'G#', octave: 1}, {note: 'D#', octave: 1}] },
+          { id: 'custom', name: 'カスタム (手動チューニング)' }
+        ],
+        5: [
+          { id: 'standard', name: '5弦 レギュラー (Low B: B E A D G)', strings: [{note: 'G', octave: 2}, {note: 'D', octave: 2}, {note: 'A', octave: 1}, {note: 'E', octave: 1}, {note: 'B', octave: 0}] },
+          { id: 'high_c', name: '5弦 High-C (E A D G C)', strings: [{note: 'C', octave: 3}, {note: 'G', octave: 2}, {note: 'D', octave: 2}, {note: 'A', octave: 1}, {note: 'E', octave: 1}] },
+          { id: 'custom', name: 'カスタム (手動チューニング)' }
+        ],
+        6: [
+          { id: 'standard', name: '6弦 レギュラー (B E A D G C)', strings: [{note: 'C', octave: 3}, {note: 'G', octave: 2}, {note: 'D', octave: 2}, {note: 'A', octave: 1}, {note: 'E', octave: 1}, {note: 'B', octave: 0}] },
+          { id: 'custom', name: 'カスタム (手動チューニング)' }
+        ]
+      }
+    };
+
+    function applyPreset() {
+      const instPresets = PRESETS[state.instrument] || PRESETS.guitar;
+      const countPresets = instPresets[state.stringCount] || instPresets[6] || instPresets[4];
+      const foundPreset = countPresets.find(p => p.id === state.preset) || countPresets[0];
+
+      const gauges = state.instrument === 'bass'
+        ? (state.stringCount === 4 ? BASS_GAUGES_4 : state.stringCount === 5 ? BASS_GAUGES_5 : BASS_GAUGES_6)
+        : (state.stringCount === 7 ? GUITAR_GAUGES_7 : GUITAR_GAUGES_6);
+
+      if (foundPreset && foundPreset.strings) {
+        state.strings = foundPreset.strings.map((s, idx) => {
+          const g = gauges[idx] || { mm: 0.23, inch: ".009" };
+          return {
+            note: s.note,
+            octave: s.octave,
+            gaugeMm: g.mm,
+            gaugeInch: g.inch
+          };
+        });
+      }
+    }
+
+    function renderStringCountButtons() {
+      const container = document.getElementById('string-count-buttons');
+      if (!container) return;
+      container.innerHTML = '';
+
+      const availableCounts = state.instrument === 'bass' ? [4, 5, 6] : [6, 7];
+      if (!availableCounts.includes(state.stringCount)) {
+        state.stringCount = availableCounts[0];
+      }
+
+      availableCounts.forEach(cnt => {
+        const btn = document.createElement('button');
+        btn.textContent = `${cnt}弦`;
+        const isActive = state.stringCount === cnt;
+        btn.className = `px-2.5 py-0.5 rounded-lg text-xs font-bold font-mono transition ${
+          isActive ? 'bg-amber-500 text-slate-950 shadow' : 'bg-slate-900 text-slate-400 border border-slate-700 hover:text-slate-200'
+        }`;
+        btn.onclick = () => {
+          state.stringCount = cnt;
+          state.preset = 'standard';
+          state.selectedStringIndex = 0;
+          applyPreset();
+          renderApp();
+          playSelectedString();
+        };
+        container.appendChild(btn);
+      });
+    }
+
+    function renderPresetOptions() {
+      const select = document.getElementById('select-preset');
+      if (!select) return;
+      select.innerHTML = '';
+
+      const instPresets = PRESETS[state.instrument] || PRESETS.guitar;
+      const countPresets = instPresets[state.stringCount] || instPresets[6] || instPresets[4];
+
+      countPresets.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = p.name;
+        if (p.id === state.preset) opt.selected = true;
+        select.appendChild(opt);
+      });
+    }
 
     // --- Math & Harmonic Helper Functions ---
     function noteToMidi(note, octave) {
@@ -1108,9 +1211,18 @@
     function renderApp() {
       saveStateToLocalStorage();
 
-      // Instrument Active Button States
+      // Instrument Type Label & Active Button States
+      const instLabel = document.getElementById('label-instrument-type');
+      if (instLabel) instLabel.textContent = state.instrument === 'bass' ? `Bass (${state.stringCount}弦)` : `Guitar (${state.stringCount}弦)`;
+
       document.getElementById('btn-inst-guitar').className = `px-3 py-1.5 rounded-xl font-semibold text-xs sm:text-sm flex items-center gap-1.5 transition ${state.instrument === 'guitar' ? 'bg-amber-500 text-slate-950 shadow-md font-bold' : 'text-slate-400 hover:text-slate-200'}`;
       document.getElementById('btn-inst-bass').className = `px-3 py-1.5 rounded-xl font-semibold text-xs sm:text-sm flex items-center gap-1.5 transition ${state.instrument === 'bass' ? 'bg-amber-500 text-slate-950 shadow-md font-bold' : 'text-slate-400 hover:text-slate-200'}`;
+
+      // Render Dynamic String Count Selector (6/7弦, 4/5/6弦)
+      renderStringCountButtons();
+
+      // Render Dynamic Tuning Presets (<select id="select-preset">)
+      renderPresetOptions();
 
       // Audio Toggle Button State
       const audioBtn = document.getElementById('btn-audio-toggle');
@@ -1664,6 +1776,7 @@
       state.preset = e.target.value;
       applyPreset();
       renderApp();
+      playSelectedString();
     };
     document.getElementById('input-capo').oninput = (e) => {
       state.capo = parseInt(e.target.value);
