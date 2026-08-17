@@ -944,6 +944,47 @@
       const tensionGlideCents = (isBass ? 14.0 : 8.0) * (isHarmonic ? 0.20 : 1.0) * (state.pickType === 'nail' ? 0.75 : state.pickType === 'pick' ? 1.0 : 1.30);
       const tensionTau = isBass ? 0.080 : 0.050;
 
+      // ⑤ ピッキング機械的過渡インパルス（Pluck Mechanical Transient / Attack Impulse）
+      // 物理力学: 弦の定常振動の有無に関わらず、弦を弾く瞬間のピック/指の弦離れ衝撃波がブリッジ・ボディを直接励起する
+      const pluckTransientDur = state.pickType === 'flesh' ? 0.022 : state.pickType === 'pick' ? 0.012 : 0.008;
+      const pluckSampleCount = Math.floor(ctx.sampleRate * pluckTransientDur);
+      const pluckBuf = ctx.createBuffer(1, pluckSampleCount, ctx.sampleRate);
+      const pluckData = pluckBuf.getChannelData(0);
+      const decayRate = state.pickType === 'flesh' ? 24.0 : 36.0;
+      
+      for (let i = 0; i < pluckSampleCount; i++) {
+        const t = i / pluckSampleCount;
+        const env = Math.exp(-t * decayRate);
+        const noise = (Math.random() * 2.0 - 1.0) * env;
+        const bodyThump = Math.sin(2.0 * Math.PI * (isBass ? 180.0 : 320.0) * (i / ctx.sampleRate)) * env * 0.6;
+        pluckData[i] = (noise + bodyThump) * 0.28 * Math.pow(gaugeFactor, 0.40);
+      }
+      
+      const pluckSource = ctx.createBufferSource();
+      pluckSource.buffer = pluckBuf;
+      
+      const pluckFilter = ctx.createBiquadFilter();
+      if (state.pickType === 'nail') {
+        pluckFilter.type = 'highpass';
+        pluckFilter.frequency.setValueAtTime(isBass ? 2500 : 3800, now);
+      } else if (state.pickType === 'pick') {
+        pluckFilter.type = 'bandpass';
+        pluckFilter.frequency.setValueAtTime(isBass ? 1600 : 2800, now);
+        pluckFilter.Q.setValueAtTime(1.2, now);
+      } else {
+        pluckFilter.type = 'lowpass';
+        pluckFilter.frequency.setValueAtTime(isBass ? 700 : 1200, now);
+      }
+
+      const pluckGain = ctx.createGain();
+      pluckGain.gain.setValueAtTime(0.045, now);
+
+      pluckSource.connect(pluckFilter);
+      pluckFilter.connect(pluckGain);
+      pluckGain.connect(masterGain); // masterGain → bodyShaper（木製ボディ共鳴）へ流れる
+      pluckSource.start(now);
+      pluckSource.stop(now + pluckTransientDur);
+
       // ④ フレット衝突力学（String-Fret Collision Dynamics / Buzz）
       if (!isHarmonic && state.pickType !== 'nail') {
         const fretCollisionDur = isBass ? 0.007 : 0.004;
@@ -963,7 +1004,7 @@
         collGain.gain.setValueAtTime(0.012, now);
         collSource.connect(collFilter);
         collFilter.connect(collGain);
-        collGain.connect(masterGain); // masterGain 配下に安全に接続
+        collGain.connect(masterGain);
         collSource.start(now);
         collSource.stop(now + fretCollisionDur);
       }
