@@ -1328,38 +1328,24 @@
       }
 
       // Pickups & Bridge Areas (Neck PU @ 82%, Bridge PU @ 90%, Bridge @ 100%)
-      // ピックアップは弦の下側（背面レイヤー z-0）に配置し、弦が手前を通過するリアルな構造
+      // ピックアップは弦の下側（背面レイヤー z-0）に純粋な視覚要素として配置
       const isNeckActive = state.pickupType === 'neck' || state.pickupType === 'both';
       const isBridgeActive = state.pickupType === 'bridge' || state.pickupType === 'both';
 
       const neckPu = document.createElement('div');
-      neckPu.className = `absolute top-0 bottom-0 w-4 border rounded z-0 -translate-x-1/2 flex items-center justify-center pointer-events-auto cursor-pointer transition-all duration-200 ${
-        isNeckActive ? 'bg-amber-500/25 border-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.5)]' : 'bg-slate-950/80 border-slate-700/80 opacity-50 hover:opacity-80'
+      neckPu.className = `absolute top-0 bottom-0 w-4 border rounded z-0 -translate-x-1/2 flex items-center justify-center pointer-events-none transition-all duration-200 ${
+        isNeckActive ? 'bg-amber-500/25 border-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.5)]' : 'bg-slate-950/80 border-slate-700/80 opacity-50'
       }`;
       neckPu.style.left = '82%';
-      neckPu.title = 'フロント (Neck Pickup) - クリックで切替';
       neckPu.innerHTML = '<div class="w-1.5 h-3/4 bg-slate-500 rounded-full border border-slate-600"></div>';
-      neckPu.onclick = (e) => {
-        e.stopPropagation();
-        state.pickupType = state.pickupType === 'neck' ? 'both' : (state.pickupType === 'both' ? 'bridge' : 'neck');
-        renderApp();
-        playSelectedString();
-      };
       inlaysContainer.appendChild(neckPu);
 
       const bridgePu = document.createElement('div');
-      bridgePu.className = `absolute top-0 bottom-0 w-4 border rounded z-0 -translate-x-1/2 flex items-center justify-center pointer-events-auto cursor-pointer transition-all duration-200 ${
-        isBridgeActive ? 'bg-amber-500/25 border-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.5)]' : 'bg-slate-950/80 border-slate-700/80 opacity-50 hover:opacity-80'
+      bridgePu.className = `absolute top-0 bottom-0 w-4 border rounded z-0 -translate-x-1/2 flex items-center justify-center pointer-events-none transition-all duration-200 ${
+        isBridgeActive ? 'bg-amber-500/25 border-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.5)]' : 'bg-slate-950/80 border-slate-700/80 opacity-50'
       }`;
       bridgePu.style.left = '90%';
-      bridgePu.title = 'リア (Bridge Pickup) - クリックで切替';
       bridgePu.innerHTML = '<div class="w-1.5 h-3/4 bg-slate-500 rounded-full border border-slate-600"></div>';
-      bridgePu.onclick = (e) => {
-        e.stopPropagation();
-        state.pickupType = state.pickupType === 'bridge' ? 'both' : (state.pickupType === 'both' ? 'neck' : 'bridge');
-        renderApp();
-        playSelectedString();
-      };
       inlaysContainer.appendChild(bridgePu);
 
       const bridgeVal = document.createElement('div');
