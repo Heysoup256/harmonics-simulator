@@ -159,14 +159,6 @@
             </div>
             <input id="input-finger-pressure" type="range" min="0.1" max="1.5" step="0.05" value="0.5" class="w-full accent-amber-400 cursor-pointer h-2 bg-slate-900 rounded-lg">
           </div>
-
-          <div class="space-y-1">
-            <div class="flex justify-between items-center text-xs">
-              <label class="text-slate-300 font-medium">ピッキング位置</label>
-              <span id="label-pick-pos" class="text-amber-400 font-bold font-mono">ブリッジ寄り</span>
-            </div>
-            <input id="input-pick-pos" type="range" min="0.70" max="0.95" step="0.01" value="0.85" class="w-full accent-amber-400 cursor-pointer h-2 bg-slate-900 rounded-lg">
-          </div>
         </div>
 
       </div>
@@ -326,7 +318,7 @@
       audioEnabled: true,
       
       stringType: 'electric',
-      pickType: 'nail',
+      pickType: 'pick', // ギター: ピックがデフォルト
 
       fingerCount: 1, // 0, 1, 2, 3
       fingerPositions: [12.0, 7.0, 5.0], // 指1, 指2, 指3 のフレット位置
@@ -1131,8 +1123,6 @@
       else if (state.fingerPressure >= 1.0) pressureLabel = '消音';
       document.getElementById('label-finger-pressure').textContent = `${pressureLabel} (${state.fingerPressure})`;
 
-      document.getElementById('label-pick-pos').textContent = state.pickPosRatio >= 0.88 ? 'ブリッジ至近' : state.pickPosRatio <= 0.75 ? 'ネック寄り' : '標準位置';
-
       renderFretboard();
       renderSpectrumAnalyzer();
     }
@@ -1464,8 +1454,6 @@
             setTimeout(() => { flashLine.style.opacity = '0'; }, 220);
           }
 
-          document.getElementById('label-last-pluck-pos').textContent = `ピッキング位置: ブリッジ寄り (${(effectiveRatio * 100).toFixed(0)}%)`;
-
           window.playString(state.selectedStringIndex);
         }
       }
@@ -1505,6 +1493,7 @@
     document.getElementById('btn-inst-guitar').onclick = () => {
       state.instrument = 'guitar';
       state.stringCount = 6;
+      state.pickType = 'pick';
       state.selectedStringIndex = 0;
       applyPreset();
       renderApp();
@@ -1512,6 +1501,7 @@
     document.getElementById('btn-inst-bass').onclick = () => {
       state.instrument = 'bass';
       state.stringCount = 4;
+      state.pickType = 'flesh'; // ベースのデフォルト: 指
       state.selectedStringIndex = 0;
       applyPreset();
       renderApp();
@@ -1562,12 +1552,6 @@
       renderApp();
     };
     document.getElementById('input-finger-pressure').onchange = () => playSelectedString();
-
-    document.getElementById('input-pick-pos').oninput = (e) => {
-      state.pickPosRatio = parseFloat(e.target.value);
-      renderApp();
-    };
-    document.getElementById('input-pick-pos').onchange = () => playSelectedString();
 
     document.getElementById('btn-strum-all').onclick = () => {
       const strumInterval = state.instrument === 'bass' ? 36 : 28;
