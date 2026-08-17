@@ -1,0 +1,1533 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>ハーモニクス 物理シミュレーター</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <style>
+    body { background-color: #0f172a; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; -webkit-tap-highlight-color: transparent; }
+    ::-webkit-scrollbar { height: 6px; width: 6px; }
+    ::-webkit-scrollbar-track { background: #1e293b; }
+    ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+    .fret-wire {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: #475569;
+      transform: translateX(-50%);
+    }
+  </style>
+</head>
+<body class="p-2 sm:p-4 md:p-6 pb-12">
+  <div id="app" class="max-w-7xl mx-auto space-y-4 sm:space-y-6">
+
+    <!-- Header -->
+    <header class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-slate-800/90 p-4 sm:p-5 rounded-2xl border border-slate-700 shadow-xl">
+      <div>
+        <h1 class="text-xl sm:text-2xl font-bold text-amber-400 flex items-center gap-2">
+          <i class="fa-solid fa-wave-square"></i> ハーモニクス 物理シミュレーター
+        </h1>
+        <p class="text-[11px] sm:text-xs text-slate-400 mt-0.5">
+          弦振動・指接触・倍音減衰物理シミュレーター
+        </p>
+      </div>
+
+      <div class="flex items-center justify-between w-full sm:w-auto gap-2">
+        <div class="bg-slate-900 p-1 rounded-xl border border-slate-700 flex text-xs font-bold flex-1 sm:flex-initial">
+          <button id="btn-inst-guitar" class="flex-1 sm:flex-initial px-3 py-1.5 rounded-lg transition bg-amber-500 text-slate-950">ギター</button>
+          <button id="btn-inst-bass" class="flex-1 sm:flex-initial px-3 py-1.5 rounded-lg transition text-slate-400">ベース</button>
+        </div>
+
+        <button id="btn-audio-toggle" class="px-3 py-1.5 rounded-xl border border-amber-400 bg-amber-500/20 text-amber-300 text-xs font-medium flex items-center gap-1.5 transition">
+          <i class="fa-solid fa-volume-high"></i>
+          <span class="hidden sm:inline">サウンド</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Grid Layout -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
+
+      <!-- Left Panel: Instrument & Physics Parameters -->
+      <div class="bg-slate-800 p-4 sm:p-5 rounded-2xl border border-slate-700 space-y-4 shadow-lg">
+        
+        <!-- Tuning, Capo & Pressed Fret -->
+        <div class="space-y-2.5">
+          <h2 class="text-base font-semibold text-slate-200 border-b border-slate-700 pb-2 flex items-center justify-between">
+            <span><i class="fa-solid fa-sliders text-amber-400 mr-2"></i>チューニング & 押弦</span>
+            <span id="label-instrument-type" class="text-xs font-normal text-amber-400/90 font-mono">Guitar</span>
+          </h2>
+
+          <div class="flex justify-between items-center text-xs">
+            <label class="text-slate-300 font-medium">弦数</label>
+            <div id="string-count-buttons" class="flex gap-1"></div>
+          </div>
+
+          <select id="select-preset" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-amber-300 font-medium focus:outline-none focus:border-amber-400">
+          </select>
+
+          <!-- Capo Slider -->
+          <div class="space-y-1">
+            <div class="flex justify-between items-center text-xs">
+              <label class="text-slate-300 font-medium">カポタスト (Capo)</label>
+              <span id="label-capo-val" class="text-amber-400 font-bold font-mono">0 フレット</span>
+            </div>
+            <input id="input-capo" type="range" min="0" max="12" value="0" class="w-full accent-amber-400 cursor-pointer h-2 bg-slate-900 rounded-lg">
+          </div>
+
+          <!-- Artificial Harmonics (左手押弦フレット) -->
+          <div class="space-y-1 pt-1">
+            <div class="flex justify-between items-center text-xs">
+              <label class="text-slate-300 font-medium">左手押弦 (人工ハーモニクス用)</label>
+              <span id="label-pressed-fret" class="text-amber-400 font-bold font-mono">開放 (0f)</span>
+            </div>
+            <input id="input-pressed-fret" type="range" min="0" max="12" value="0" step="1" class="w-full accent-amber-400 cursor-pointer h-2 bg-slate-900 rounded-lg">
+            <p class="text-[10px] text-slate-400">※押弦フレットからの相対位置でハーモニクスを計算します</p>
+          </div>
+
+          <!-- Strings List -->
+          <div id="container-strings-tuning" class="space-y-1 max-h-36 overflow-y-auto pr-1"></div>
+        </div>
+
+        <!-- Material & Technique Parameters -->
+        <div class="space-y-2.5 pt-2 border-t border-slate-700/80">
+          <h2 class="text-base font-semibold text-slate-200 border-b border-slate-700 pb-1.5 flex items-center justify-between">
+            <span><i class="fa-solid fa-guitar text-amber-400 mr-2"></i>弦の種類 & 奏法</span>
+          </h2>
+
+          <div class="space-y-1">
+            <label class="text-xs text-slate-300 font-medium block">弦の種類（材質）</label>
+            <select id="select-string-type" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-amber-400">
+              <option value="electric">エレキ弦 (スチール/ニッケル)</option>
+              <option value="acoustic">アコギ弦 (フォスファーブロンズ)</option>
+              <option value="nylon">クラシック弦 (ナイロン)</option>
+            </select>
+          </div>
+
+          <div class="space-y-1">
+            <label class="text-xs text-slate-300 font-medium block">ピッキング奏法</label>
+            <select id="select-pick-type" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-amber-400">
+              <option value="nail">爪（ネイル）：高次倍音まで励起</option>
+              <option value="pick">ピック：標準アタック</option>
+              <option value="flesh">指の腹：高次倍音が抑えられた丸い音</option>
+            </select>
+          </div>
+
+          <div class="space-y-1">
+            <label class="text-xs text-slate-300 font-medium block">ボディ材（木材種）</label>
+            <select id="select-body-type" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-amber-400">
+              <option value="bright">明るい（スプルース/アッシュ/メイプル）</option>
+              <option value="standard" selected>標準（スプルース/マホガニー/アルダー）</option>
+              <option value="warm">温かい（シダー/マホガニー/ウォルナット）</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Physical Finger Parameters -->
+        <div class="space-y-3 pt-2 border-t border-slate-700/80">
+          <h2 class="text-base font-semibold text-slate-200 border-b border-slate-700 pb-1.5 flex items-center justify-between">
+            <span><i class="fa-solid fa-hand-point-down text-amber-400 mr-2"></i>指の条件</span>
+            <span class="text-[10px] text-slate-400 font-normal">0.1mm〜12mm</span>
+          </h2>
+
+          <!-- Multi-Finger Count Toggle -->
+          <div class="space-y-1">
+            <label class="text-xs text-slate-300 font-medium block">指の数（マルチタッチ）</label>
+            <div id="container-finger-count-buttons" class="grid grid-cols-4 gap-1"></div>
+          </div>
+
+          <div class="space-y-1">
+            <div class="flex justify-between items-center text-xs">
+              <label class="text-slate-300 font-medium">指の接触幅（肉厚）</label>
+              <span id="label-finger-width" class="text-amber-400 font-bold font-mono">1.5 mm (爪先)</span>
+            </div>
+            <input id="input-finger-width" type="range" min="0.1" max="12.0" step="0.1" value="1.5" class="w-full accent-amber-400 cursor-pointer h-2 bg-slate-900 rounded-lg">
+            <div class="flex justify-between text-[9px] text-slate-500 font-mono">
+              <span>爪先 (0.1mm)</span>
+              <span>点接触 (1.5mm)</span>
+              <span>指の腹 (12mm)</span>
+            </div>
+          </div>
+
+          <div class="space-y-1">
+            <div class="flex justify-between items-center text-xs">
+              <label class="text-slate-300 font-medium">指の圧力（触れ具合）</label>
+              <span id="label-finger-pressure" class="text-amber-400 font-bold font-mono">適度な軽触</span>
+            </div>
+            <input id="input-finger-pressure" type="range" min="0.1" max="1.5" step="0.05" value="0.5" class="w-full accent-amber-400 cursor-pointer h-2 bg-slate-900 rounded-lg">
+          </div>
+
+          <div class="space-y-1">
+            <div class="flex justify-between items-center text-xs">
+              <label class="text-slate-300 font-medium">ピッキング位置</label>
+              <span id="label-pick-pos" class="text-amber-400 font-bold font-mono">ブリッジ寄り</span>
+            </div>
+            <input id="input-pick-pos" type="range" min="0.70" max="0.95" step="0.01" value="0.85" class="w-full accent-amber-400 cursor-pointer h-2 bg-slate-900 rounded-lg">
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Right Panel: Finger Sliders, Visualizer & Spectrum -->
+      <div class="lg:col-span-2 space-y-4 sm:space-y-6">
+
+        <!-- Finger Position Controls -->
+        <div class="bg-slate-800 p-4 sm:p-5 rounded-2xl border border-slate-700 space-y-3 shadow-lg">
+          <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-700 pb-2.5">
+            <div>
+              <h3 class="font-bold text-slate-100 text-base flex items-center gap-2">
+                <i class="fa-solid fa-fingerprint text-amber-400"></i> 指の位置設定
+              </h3>
+              <p class="text-xs text-slate-400 mt-0.5">指の位置（フレット）を個別に調整できます。</p>
+            </div>
+          </div>
+
+          <div id="container-finger-sliders" class="space-y-2.5"></div>
+        </div>
+
+        <!-- Realtime String Vibration Visualizer (HTML5 Canvas) -->
+        <div class="bg-slate-800 p-4 sm:p-5 rounded-2xl border border-slate-700 space-y-3 shadow-lg">
+          <div class="flex justify-between items-center text-xs sm:text-sm">
+            <h3 class="font-semibold text-slate-200 flex items-center gap-1.5">
+              <i class="fa-solid fa-chart-line text-amber-400"></i> リアルタイム 弦物理定常波アニメーション
+            </h3>
+            <span id="label-node-match-indicator" class="text-xs font-mono font-bold text-amber-300">ノード適合度: --%</span>
+          </div>
+
+          <div class="bg-slate-950 p-2 rounded-xl border border-slate-800 relative">
+            <canvas id="canvas-string-wave" class="w-full h-28 block rounded-lg"></canvas>
+            <div class="absolute bottom-3 left-4 text-[10px] text-slate-500 font-mono pointer-events-none">
+              ← ナット/カポ (0f)
+            </div>
+            <div class="absolute bottom-3 right-4 text-[10px] text-slate-500 font-mono pointer-events-none">
+              ブリッジ (100%) →
+            </div>
+          </div>
+        </div>
+
+        <!-- Fretboard Area -->
+        <div class="bg-slate-800 p-3 sm:p-5 rounded-2xl border border-slate-700 space-y-3 shadow-lg">
+          <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-1 text-xs sm:text-sm">
+            <h3 class="font-semibold text-slate-200 flex items-center gap-1.5">
+              <i class="fa-solid fa-grip-lines-vertical text-amber-400"></i> 指板 ＆ ピックアップ表示
+            </h3>
+            <span id="label-last-pluck-pos" class="text-[11px] text-amber-300 font-mono font-bold">ピッキング位置: ブリッジ寄り (85%)</span>
+          </div>
+          <p class="text-[11px] text-slate-400">
+            ※指マークをドラッグして位置を調整できます。各弦を直接タップするとその弦をその位置でピッキングします。
+          </p>
+
+          <!-- Fretboard Container -->
+          <div class="w-full pb-2 pt-1 border border-slate-700/60 rounded-xl bg-slate-950 px-2 sm:px-4">
+            <div id="fretboard-click-area" class="w-full p-2 sm:p-3 relative select-none space-y-2 cursor-pointer">
+              
+              <!-- Fret Numbers Header -->
+              <div class="flex items-center font-mono text-[10px] text-slate-400 pointer-events-none">
+                <div class="w-8 shrink-0 font-bold text-slate-500">fret</div>
+                <div id="fret-numbers-row" class="flex-1 relative h-5"></div>
+              </div>
+
+              <!-- Fretboard Wire & Strings Overlay -->
+              <div class="relative bg-slate-900 border-y-2 border-slate-700 py-2">
+                
+                <div class="absolute inset-0 flex items-center pointer-events-none">
+                  <div class="w-8 shrink-0"></div>
+                  <div class="flex-1 relative h-full">
+                    <div id="fret-wires-container" class="absolute inset-0"></div>
+                    <div id="fret-inlays-container" class="absolute inset-0 flex items-center"></div>
+
+                    <!-- Dynamic Finger Overlays Overlay -->
+                    <div id="container-finger-bands-overlay" class="absolute inset-0 pointer-events-none"></div>
+
+                    <!-- Picking Flash Line -->
+                    <div id="pluck-flash-line" class="absolute top-0 bottom-0 w-1 bg-amber-400 shadow-[0_0_12px_#fbbf24] pointer-events-none transition-opacity duration-300 opacity-0 z-30"></div>
+                  </div>
+                </div>
+
+                <div id="fret-strings-container" class="space-y-3 relative z-10 py-1"></div>
+
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Realtime Spectrum & Volume Analysis -->
+        <div class="bg-slate-800 p-4 sm:p-5 rounded-2xl border border-slate-700 space-y-4 shadow-lg">
+          <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-700 pb-3">
+            <div>
+              <h3 class="font-bold text-slate-100 text-base flex items-center gap-2">
+                <i class="fa-solid fa-chart-column text-amber-400"></i> 実効音量スペクトル (1〜16倍音)
+              </h3>
+              <p class="text-xs text-slate-400 mt-0.5">スケール・太さ・指減衰を反映した各倍音の絶対音量レベル（%）</p>
+            </div>
+
+            <button id="btn-strum-all" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs sm:text-sm flex items-center gap-2 shadow-lg transition">
+              <i class="fa-solid fa-play"></i> 全弦ストローク
+            </button>
+          </div>
+
+          <div class="space-y-1.5">
+            <label class="text-xs text-slate-300 font-medium">弦を選んでピッキング:</label>
+            <div id="string-play-buttons" class="flex flex-wrap gap-2"></div>
+          </div>
+
+          <div class="bg-slate-900 p-4 rounded-xl border border-slate-700 space-y-3">
+            <div class="flex justify-between items-center text-xs">
+              <span class="font-bold text-slate-300" id="label-current-spectrum-string">1弦の倍音スペクトル</span>
+              <span class="text-slate-400 text-[11px]" id="label-current-string-gauge">太さ: 0.23 mm (.009")</span>
+            </div>
+
+            <div id="spectrum-bars-grid" class="grid grid-cols-8 sm:grid-cols-16 gap-1.5 h-36 items-end pt-4 pb-1 border-b border-slate-800">
+            </div>
+
+            <div id="spectrum-summary-box" class="bg-slate-950 p-3 rounded-lg border border-slate-800 flex flex-col sm:flex-row justify-between items-start sm:items-center text-xs gap-2">
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+  </div>
+
+  <script>
+    // --- Application State & String Gauge Specifications ---
+    const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+    const GUITAR_GAUGES_6 = [
+      { mm: 0.23, inch: ".009" }, { mm: 0.28, inch: ".011" }, { mm: 0.41, inch: ".016" },
+      { mm: 0.61, inch: ".024" }, { mm: 0.81, inch: ".032" }, { mm: 1.07, inch: ".042" }
+    ];
+    const GUITAR_GAUGES_7 = [
+      { mm: 0.23, inch: ".009" }, { mm: 0.28, inch: ".011" }, { mm: 0.41, inch: ".016" },
+      { mm: 0.61, inch: ".024" }, { mm: 0.81, inch: ".032" }, { mm: 1.07, inch: ".042" }, { mm: 1.37, inch: ".054" }
+    ];
+    const BASS_GAUGES_4 = [
+      { mm: 1.14, inch: ".045" }, { mm: 1.65, inch: ".065" }, { mm: 2.16, inch: ".085" }, { mm: 2.67, inch: ".105" }
+    ];
+    const BASS_GAUGES_5 = [
+      { mm: 1.14, inch: ".045" }, { mm: 1.65, inch: ".065" }, { mm: 2.16, inch: ".085" }, { mm: 2.67, inch: ".105" }, { mm: 3.30, inch: ".130" }
+    ];
+    const BASS_GAUGES_6 = [
+      { mm: 0.81, inch: ".032" }, { mm: 1.14, inch: ".045" }, { mm: 1.65, inch: ".065" },
+      { mm: 2.16, inch: ".085" }, { mm: 2.67, inch: ".105" }, { mm: 3.30, inch: ".130" }
+    ];
+
+    const state = {
+      instrument: 'guitar', // 'guitar' | 'bass'
+      stringCount: 6,
+      preset: 'standard',
+      capo: 0,
+      pressedFret: 0,
+      audioEnabled: true,
+      
+      stringType: 'electric',
+      pickType: 'nail',
+
+      fingerCount: 1, // 0, 1, 2, 3
+      fingerPositions: [12.0, 7.0, 5.0], // 指1, 指2, 指3 のフレット位置
+      fingerWidthMm: 1.5,
+      fingerPressure: 0.5,
+      pickPosRatio: 0.85,
+      bodyType: 'standard', // 'bright' | 'standard' | 'warm'
+      
+      selectedStringIndex: 0,
+      strings: [],
+      
+      waveTime: 0,
+      draggingFingerIndex: -1
+    };
+
+    // --- Math & Harmonic Helper Functions ---
+    function noteToMidi(note, octave) {
+      return (octave + 1) * 12 + NOTE_NAMES.indexOf(note);
+    }
+
+    function midiToNoteInfo(midi) {
+      const octave = Math.floor(midi / 12) - 1;
+      const noteIndex = Math.floor(midi) % 12;
+      const noteName = NOTE_NAMES[(noteIndex + 12) % 12];
+      return { noteName, octave, full: `${noteName}${octave}` };
+    }
+
+    function midiToFreq(midi) {
+      return 440 * Math.pow(2, (midi - 69) / 12);
+    }
+
+    function getSoundingNoteName(note, octave, capoVal) {
+      const midi = noteToMidi(note, octave) + capoVal + state.pressedFret;
+      return midiToNoteInfo(midi).full;
+    }
+
+    function formatMicrotoneNote(midiVal) {
+      const roundedMidi = Math.round(midiVal);
+      let rawCents = (midiVal - roundedMidi) * 100;
+      const baseNoteInfo = midiToNoteInfo(roundedMidi);
+      let symbol = "";
+      let finalCents = rawCents;
+
+      if (rawCents > 25) {
+        symbol = "‡";
+        finalCents = rawCents - 50;
+      } else if (rawCents < -25) {
+        symbol = "d";
+        finalCents = rawCents + 50;
+      }
+
+      const centValRounded = Math.round(finalCents);
+      const centFormatted = centValRounded === 0 ? "±0c" : (centValRounded > 0 ? `+${centValRounded}c` : `${centValRounded}c`);
+      return `${baseNoteInfo.full}${symbol} (${centFormatted})`;
+    }
+
+    // --- Physics Engine: Scale Length, Artificial Harmonics & Automatic Fundamental Tuning ---
+    function calculateHarmonicModalData(stringObj, capoVal, fingerPositionsArray, activeFingerCount, fingerWidthMm, fingerPressure, pickPosRatio, stringType, pickType, instrumentType, pressedFret) {
+      const fullScale = instrumentType === 'bass' ? 0.864 : 0.648;
+      const effectiveCapoPlusPressed = capoVal + pressedFret;
+      const L_prime = fullScale * Math.pow(2, -effectiveCapoPlusPressed / 12.0);
+      
+      const w = fingerWidthMm / 1000.0;
+      const x_pick = L_prime * pickPosRatio;
+
+      const baseMidi = noteToMidi(stringObj.note, stringObj.octave) + effectiveCapoPlusPressed;
+      const f_target = midiToFreq(baseMidi); // 12平均律の目標基音周波数
+
+      const gaugeMm = stringObj.gaugeMm || 0.23;
+      const gaugeFactor = gaugeMm / 0.23;
+
+      // ピッキング奏法による初期励起スペクトル傾斜 (alpha)
+      let alpha;
+      if (pickType === 'nail') {
+        alpha = 0.38;
+      } else if (pickType === 'pick') {
+        alpha = 0.48;
+      } else {
+        alpha = instrumentType === 'bass' ? 0.58 : 0.80;
+      }
+
+      // 曲げ剛性（インハーモニシティ）係数 B
+      const coreFactor = instrumentType === 'bass' ? Math.pow(gaugeFactor, 0.45) : Math.pow(gaugeFactor, 1.2);
+      const B = 0.000032 * coreFactor;
+
+      // 自動チューニング補正
+      const f0_prime = f_target / Math.sqrt(1.0 + B);
+
+      // ピッキングツールの有限接触幅 (爪:2mm, ピック:5mm, 指:12mm)
+      const pluckWidth = pickType === 'nail' ? 0.002 : pickType === 'pick' ? 0.005 : 0.012;
+
+      // 弦の物理的損失係数（空気抵抗 + 弦内部粘弾性曲げ摩擦 + ブリッジ音響放射）
+      // ギター開放弦基音: gamma ~ 1.4/s (T60 ~ 5s), ベース開放弦基音: gamma ~ 1.0/s (T60 ~ 7s)
+      const baseGamma = instrumentType === 'bass' ? 0.95 : (stringType === 'nylon' ? 1.8 : stringType === 'acoustic' ? 1.3 : 1.45);
+      const massFactor = instrumentType === 'bass' ? Math.pow(gaugeFactor, -0.22) : Math.pow(gaugeFactor, -0.10);
+
+      const harmonics = [];
+      let totalSurvivingEnergy = 0;
+
+      for (let n = 1; n <= 16; n++) {
+        const kn = (n * Math.PI) / L_prime;
+
+        // アクティブなすべての指からの総合減衰率を積算
+        let totalFingerDampingRate = 0;
+
+        if (activeFingerCount > 0) {
+          for (let fIdx = 0; fIdx < activeFingerCount; fIdx++) {
+            const barreFretRel = fingerPositionsArray[fIdx];
+            const touchFretDist = Math.max(0.01, barreFretRel - pressedFret);
+            const x_touch = L_prime * (1.0 - Math.pow(2, -touchFretDist / 12.0));
+
+            const x1 = Math.max(0, x_touch - w / 2.0);
+            const x2 = Math.min(L_prime, x_touch + w / 2.0);
+            const effectiveW = Math.max(0.00005, x2 - x1);
+
+            const integralVal = ((x2 / 2.0) - Math.sin(2.0 * kn * x2) / (4.0 * kn)) - 
+                                ((x1 / 2.0) - Math.sin(2.0 * kn * x1) / (4.0 * kn));
+            
+            const overlapFactor = Math.max(0, Math.min(1.0, integralVal / effectiveW));
+            // 節点（overlapFactor ≈ 0）にある倍音は指に触れられていても全くダンプされない
+            const fingerDamping = fingerPressure * overlapFactor * 120.0 * Math.sqrt(gaugeFactor);
+            
+            totalFingerDampingRate += fingerDamping;
+          }
+        }
+
+        // ピッキング位置の物理励起 (有限接触幅のsinc平滑化 + 残留結合フロア)
+        const sincArg = (kn * pluckWidth) / 2.0;
+        const sincVal = sincArg === 0 ? 1.0 : Math.sin(sincArg) / sincArg;
+        const rawExcitation = Math.sin(kn * x_pick) * sincVal;
+        const pickExcitation = Math.sqrt(rawExcitation * rawExcitation + 0.025);
+
+        // 初期励起振幅
+        const baseInitialAmp = (0.75 / Math.pow(n, alpha)) * pickExcitation;
+
+        // 弦固有の物理減衰率 gamma_n [1/sec]
+        // 低次モード: 空気に律速 (gamma ~ 1.0〜1.5/s)
+        // 高次モード: 内部曲げ粘弾性により損失増大 (gamma ∝ sqrt(n) + 0.02*n^1.4)
+        const naturalGamma = (baseGamma * massFactor * Math.sqrt(n)) + (0.018 * Math.pow(n, 1.4));
+        const totalGamma = naturalGamma + totalFingerDampingRate;
+
+        // 可聴限界(-80dB, 1/10000)までの物理到達時間 T_audible = ln(10000) / totalGamma = 9.21 / totalGamma
+        const audibleDurationSec = 9.21 / totalGamma;
+
+        // 100ms後の残存エネルギー（UI表示・支配的倍音判定用）
+        const energyAtAudible = baseInitialAmp * Math.exp(-totalGamma * 0.10);
+        totalSurvivingEnergy += energyAtAudible;
+
+        // n倍音のインハーモニシティ計算
+        const inharmonicFreq = n * f0_prime * Math.sqrt(1.0 + B * n * n);
+        const midiVal = baseMidi + 12.0 * Math.log2(inharmonicFreq / f_target);
+
+        harmonics.push({
+          n,
+          freq: inharmonicFreq,
+          midiVal,
+          noteFormatted: formatMicrotoneNote(midiVal),
+          overlapFactor: activeFingerCount > 0 ? (totalFingerDampingRate / (activeFingerCount * 120.0 * Math.sqrt(gaugeFactor))) : 0,
+          fingerDampingRate: totalFingerDampingRate,
+          totalDampingRate: totalGamma,
+          initialAmp: baseInitialAmp,
+          survivingAmp: energyAtAudible,
+          survivingEnergy: energyAtAudible,
+          decayTimeSec: audibleDurationSec
+        });
+      }
+
+      const dominantHarmonic = [...harmonics].sort((a, b) => b.survivingEnergy - a.survivingEnergy)[0];
+
+      // 代表指 (指1) の接触位置割合
+      const touchFretDist1 = Math.max(0.01, fingerPositionsArray[0] - pressedFret);
+      const x_touch1 = L_prime * (1.0 - Math.pow(2, -touchFretDist1 / 12.0));
+
+      return {
+        fundamentalFreq: f_target,
+        baseMidi,
+        gaugeMm,
+        gaugeInch: stringObj.gaugeInch,
+        harmonics,
+        dominantHarmonic,
+        totalSurvivingEnergy,
+        xTouchRatio: x_touch1 / L_prime
+      };
+    }
+
+    // ============================================================
+    // 物理音響合成エンジン v2 - 弦の初期変位解放・モード減衰物理合成
+    // ============================================================
+
+    let audioCtx = null;
+    let masterBus = null;
+    const activeVoices = [];
+    const MAX_VOICES = 16;
+
+    // AudioContext の初期化・再開
+    async function ensureAudioContext() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') {
+        try { await audioCtx.resume(); } catch(e) {}
+      }
+      return audioCtx;
+    }
+
+    // 共有マスターバス（マスタリングコンプレッサー＋マスターリミッター）
+    function getMasterBus(ctx) {
+      if (masterBus && masterBus.ctx === ctx) return masterBus;
+
+      const input = ctx.createGain();
+      input.gain.setValueAtTime(1.0, ctx.currentTime);
+
+      const comp = ctx.createDynamicsCompressor();
+      comp.threshold.setValueAtTime(-12.0, ctx.currentTime);
+      comp.knee.setValueAtTime(8.0, ctx.currentTime);
+      comp.ratio.setValueAtTime(8.0, ctx.currentTime);
+      comp.attack.setValueAtTime(0.003, ctx.currentTime);
+      comp.release.setValueAtTime(0.12, ctx.currentTime);
+
+      const clipper = createSoftClipper(ctx);
+
+      const masterOut = ctx.createGain();
+      masterOut.gain.setValueAtTime(0.78, ctx.currentTime);
+
+      input.connect(comp);
+      comp.connect(clipper);
+      clipper.connect(masterOut);
+      masterOut.connect(ctx.destination);
+
+      masterBus = { ctx, input, comp, clipper, masterOut };
+      return masterBus;
+    }
+
+    // 同時発音数制限
+    function limitVoices(ctx) {
+      if (activeVoices.length < MAX_VOICES) return;
+      const toKill = activeVoices.splice(0, activeVoices.length - MAX_VOICES + 3);
+      const now = ctx.currentTime;
+      toKill.forEach(v => {
+        try {
+          v.masterGain.gain.setTargetAtTime(0.00001, now, 0.020);
+          setTimeout(() => { try { v.masterGain.disconnect(); } catch(e) {} }, 100);
+        } catch(e) {}
+      });
+    }
+
+    // tanh型ソフトクリッパー
+    function createSoftClipper(ctx) {
+      const n = 512;
+      const curve = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        const x = (i / (n - 1)) * 2.0 - 1.0;
+        curve[i] = Math.tanh(2.0 * x) / Math.tanh(2.0);
+      }
+      const ws = ctx.createWaveShaper();
+      ws.curve = curve;
+      ws.oversample = '2x';
+      return ws;
+    }
+
+    // 楽器の胴体・空洞（キャビティ）による自然な音響伝達関数
+    function createBodyResonanceShaper(ctx, instrumentType, stringType, bodyType, now) {
+      const isBass = instrumentType === 'bass';
+      
+      const lowBody = ctx.createBiquadFilter();
+      lowBody.type = 'peaking';
+      if (isBass) {
+        const f = bodyType === 'warm' ? 95 : bodyType === 'bright' ? 140 : 115;
+        lowBody.frequency.setValueAtTime(f, now);
+        lowBody.Q.setValueAtTime(1.1, now);
+        lowBody.gain.setValueAtTime(4.0, now);
+      } else {
+        const f = stringType === 'acoustic' ? 120 : 180;
+        lowBody.frequency.setValueAtTime(f, now);
+        lowBody.Q.setValueAtTime(1.0, now);
+        lowBody.gain.setValueAtTime(3.0, now);
+      }
+
+      const midBody = ctx.createBiquadFilter();
+      midBody.type = 'peaking';
+      if (isBass) {
+        const f = bodyType === 'warm' ? 380 : bodyType === 'bright' ? 620 : 480;
+        midBody.frequency.setValueAtTime(f, now);
+        midBody.Q.setValueAtTime(0.9, now);
+        midBody.gain.setValueAtTime(2.2, now);
+      } else {
+        midBody.frequency.setValueAtTime(stringType === 'acoustic' ? 450 : 800, now);
+        midBody.Q.setValueAtTime(0.8, now);
+        midBody.gain.setValueAtTime(1.8, now);
+      }
+
+      lowBody.connect(midBody);
+      return { input: lowBody, output: midBody };
+    }
+
+    async function synthesizePhysicalHarmonic(modalData, isBass) {
+      if (!state.audioEnabled) return;
+      const ctx = await ensureAudioContext();
+      if (!ctx) return;
+
+      limitVoices(ctx);
+      const mb = getMasterBus(ctx);
+
+      const now = ctx.currentTime;
+      const gaugeMm  = modalData.gaugeMm;
+      const gaugeFactor = gaugeMm / 0.23;
+
+      // 全倍音中の最長可聴サステイン
+      let longestDecay = 0.05;
+      modalData.harmonics.forEach(h => {
+        if (h.decayTimeSec > longestDecay) longestDecay = h.decayTimeSec;
+      });
+      const maxDecaySec = Math.min(isBass ? 9.5 : 7.0, longestDecay);
+
+      // ---- アタックタイム (指やピックの弦離れ解放時間 1.5〜3.5ms) ----
+      let attackMs;
+      if (isBass) {
+        attackMs = state.pickType === 'nail'  ? 1.5
+                 : state.pickType === 'pick'  ? 2.2
+                 :                              3.2; // 指弾き
+      } else {
+        attackMs = state.pickType === 'nail'  ? 1.8 + gaugeFactor * 0.2
+                 : state.pickType === 'pick'  ? 2.5 + gaugeFactor * 0.4
+                 :                              4.0 + gaugeFactor * 0.6;
+        if (state.stringType === 'nylon') attackMs *= 1.3;
+      }
+      const attackTime = Math.max(0.001, attackMs / 1000);
+
+      // ---- ボイスゲイン: 弦の総運動エネルギーに基づくスケーリング ----
+      const gaugeVol = Math.pow(gaugeFactor, 0.25);
+      const bassWeight = isBass ? 1.45 : 1.0;
+      const voiceGainVal = Math.min(0.22, 0.085 * gaugeVol * bassWeight);
+
+      const masterGain = ctx.createGain();
+      masterGain.gain.setValueAtTime(voiceGainVal, now);
+      activeVoices.push({ masterGain, startTime: now });
+
+      // ---- 信号チェーン ----
+      const bodyShaper = createBodyResonanceShaper(ctx, state.instrument, state.stringType, state.bodyType, now);
+
+      const matLPF = ctx.createBiquadFilter();
+      matLPF.type = 'lowpass';
+      const openLPFCutoff = isBass ? 9000 : {nylon: 4500, acoustic: 8500, electric: 12000}[state.stringType] || 10000;
+      matLPF.frequency.setValueAtTime(openLPFCutoff, now);
+      matLPF.Q.setValueAtTime(0.707, now);
+
+      const clipper = createSoftClipper(ctx);
+
+      masterGain.connect(bodyShaper.input);
+      bodyShaper.output.connect(matLPF);
+      matLPF.connect(clipper);
+      clipper.connect(mb.input); // 共有マスターバスへ接続
+
+      // ---- 弦の初期変位解放＆モード減衰物理合成 ----
+      // 物理法則通りの厳密な指数減衰: 各倍音が物理減衰率 gamma_n に従って -80dB (0.0001) まで正確に減衰
+      modalData.harmonics.forEach((h, idx) => {
+        if (h.initialAmp < 0.0001) return;
+
+        const osc   = ctx.createOscillator();
+        const hGain = ctx.createGain();
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(h.freq, now);
+
+        // ベースの低次モードエネルギー補正
+        let massBoost = 1.0;
+        if (isBass) {
+          if (h.n === 1) massBoost = 1.25;
+          else if (h.n === 2) massBoost = 1.15;
+          else if (h.n === 3) massBoost = 1.08;
+        }
+
+        const peak = Math.min(0.95, h.initialAmp * massBoost * 1.25);
+        const hDecay = Math.min(maxDecaySec, Math.max(0.020, h.decayTimeSec));
+
+        // 初期変位からの解放スナップ（リニアアタック → 物理指数減衰 e^(-gamma*t)）
+        hGain.gain.setValueAtTime(0.00001, now);
+        hGain.gain.linearRampToValueAtTime(peak, now + attackTime);
+        hGain.gain.exponentialRampToValueAtTime(0.0001, now + hDecay);
+
+        osc.connect(hGain);
+        hGain.connect(masterGain);
+        osc.start(now);
+        osc.stop(now + hDecay + 0.1);
+      });
+
+      // ---- クリーンアップ ----
+      const lifetimeSec = maxDecaySec + 1.0;
+      setTimeout(() => {
+        try {
+          masterGain.disconnect();
+          bodyShaper.input.disconnect();
+          bodyShaper.output.disconnect();
+          const idx = activeVoices.findIndex(v => v.masterGain === masterGain);
+          if (idx >= 0) activeVoices.splice(idx, 1);
+        } catch(e) {}
+      }, lifetimeSec * 1000);
+    }
+
+
+
+    // --- Preset Tunings ---
+    function applyPreset() {
+      let gaugeList = GUITAR_GAUGES_6;
+      if (state.instrument === 'guitar') {
+        gaugeList = state.stringCount === 6 ? GUITAR_GAUGES_6 : GUITAR_GAUGES_7;
+      } else {
+        if (state.stringCount === 4) gaugeList = BASS_GAUGES_4;
+        else if (state.stringCount === 5) gaugeList = BASS_GAUGES_5;
+        else gaugeList = BASS_GAUGES_6;
+      }
+
+      if (state.preset === 'custom') {
+        state.strings.forEach((s, i) => {
+          if (gaugeList[i]) {
+            s.gaugeMm = gaugeList[i].mm;
+            s.gaugeInch = gaugeList[i].inch;
+          }
+        });
+        return;
+      }
+
+      const createStr = (note, octave, idx) => ({
+        note, octave,
+        gaugeMm: gaugeList[idx].mm,
+        gaugeInch: gaugeList[idx].inch
+      });
+
+      if (state.instrument === 'guitar') {
+        if (state.stringCount === 6) {
+          switch(state.preset) {
+            case 'standard':
+              state.strings = [createStr('E',4,0), createStr('B',3,1), createStr('G',3,2), createStr('D',3,3), createStr('A',2,4), createStr('E',2,5)];
+              break;
+            case 'dropD':
+              state.strings = [createStr('E',4,0), createStr('B',3,1), createStr('G',3,2), createStr('D',3,3), createStr('A',2,4), createStr('D',2,5)];
+              break;
+            case 'halfStepDown':
+              state.strings = [createStr('D#',4,0), createStr('A#',3,1), createStr('F#',3,2), createStr('C#',3,3), createStr('G#',2,4), createStr('D#',2,5)];
+              break;
+            case 'dmajor':
+              state.strings = [createStr('D',4,0), createStr('A',3,1), createStr('F#',3,2), createStr('D',3,3), createStr('A',2,4), createStr('D',2,5)];
+              break;
+            case 'dsus4':
+              state.strings = [createStr('D',4,0), createStr('A',3,1), createStr('G',3,2), createStr('D',3,3), createStr('A',2,4), createStr('D',2,5)];
+              break;
+            case 'openg':
+              state.strings = [createStr('D',4,0), createStr('B',3,1), createStr('G',3,2), createStr('D',3,3), createStr('G',2,4), createStr('D',2,5)];
+              break;
+            case 'openc':
+              state.strings = [createStr('E',4,0), createStr('C',4,1), createStr('G',3,2), createStr('C',3,3), createStr('G',2,4), createStr('C',2,5)];
+              break;
+          }
+        } else if (state.stringCount === 7) {
+          state.strings = [createStr('E',4,0), createStr('B',3,1), createStr('G',3,2), createStr('D',3,3), createStr('A',2,4), createStr('E',2,5), createStr('B',1,6)];
+        }
+      } else {
+        // Bass
+        if (state.stringCount === 4) {
+          switch(state.preset) {
+            case 'standard':
+              state.strings = [createStr('G',2,0), createStr('D',2,1), createStr('A',1,2), createStr('E',1,3)];
+              break;
+            case 'dropD':
+              state.strings = [createStr('G',2,0), createStr('D',2,1), createStr('A',1,2), createStr('D',1,3)];
+              break;
+            case 'halfStepDown':
+              state.strings = [createStr('F#',2,0), createStr('C#',2,1), createStr('G#',1,2), createStr('D#',1,3)];
+              break;
+          }
+        } else if (state.stringCount === 5) {
+          state.strings = [createStr('G',2,0), createStr('D',2,1), createStr('A',1,2), createStr('E',1,3), createStr('B',0,4)];
+        } else if (state.stringCount === 6) {
+          state.strings = [createStr('C',3,0), createStr('G',2,1), createStr('D',2,2), createStr('A',1,3), createStr('E',1,4), createStr('B',0,5)];
+        }
+      }
+    }
+
+    // --- Canvas Realtime Wave Animation Renderer ---
+    function drawCanvasStringWave() {
+      const canvas = document.getElementById('canvas-string-wave');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+
+      const width = canvas.clientWidth;
+      const height = canvas.clientHeight;
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+
+      ctx.clearRect(0, 0, width, height);
+
+      const curStr = state.strings[state.selectedStringIndex] || state.strings[0];
+      const modalData = calculateHarmonicModalData(
+        curStr,
+        state.capo,
+        state.fingerPositions,
+        state.fingerCount,
+        state.fingerWidthMm,
+        state.fingerPressure,
+        state.pickPosRatio,
+        state.stringType,
+        state.pickType,
+        state.instrument,
+        state.pressedFret
+      );
+
+      state.waveTime += 0.08;
+
+      const centerY = height / 2.0;
+      const paddingX = 20;
+      const activeWidth = width - paddingX * 2;
+
+      // Draw Nut & Bridge Vertical Lines
+      ctx.strokeStyle = '#475569';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(paddingX, 10); ctx.lineTo(paddingX, height - 10);
+      ctx.moveTo(width - paddingX, 10); ctx.lineTo(width - paddingX, height - 10);
+      ctx.stroke();
+
+      // Finger Touch Band Highlight for Active Fingers
+      if (state.fingerCount > 0) {
+        for (let fIdx = 0; fIdx < state.fingerCount; fIdx++) {
+          const barreFretRel = state.fingerPositions[fIdx];
+          const touchFretDist = Math.max(0.01, barreFretRel - state.pressedFret);
+          const fullScale = state.instrument === 'bass' ? 0.864 : 0.648;
+          const effectiveCapoPlusPressed = state.capo + state.pressedFret;
+          const L_prime = fullScale * Math.pow(2, -effectiveCapoPlusPressed / 12.0);
+          const x_touch = L_prime * (1.0 - Math.pow(2, -touchFretDist / 12.0));
+          const touchRatio = x_touch / L_prime;
+
+          const xTouchPx = paddingX + activeWidth * touchRatio;
+          const fingerBandPx = Math.max(3, (state.fingerWidthMm / 648.0) * activeWidth * 2.5);
+
+          ctx.fillStyle = fIdx === 0 ? 'rgba(244, 63, 94, 0.25)' : fIdx === 1 ? 'rgba(56, 189, 248, 0.25)' : 'rgba(250, 204, 21, 0.25)';
+          ctx.fillRect(xTouchPx - fingerBandPx / 2, 8, fingerBandPx, height - 16);
+          ctx.strokeStyle = fIdx === 0 ? 'rgba(244, 63, 94, 0.8)' : fIdx === 1 ? 'rgba(56, 189, 248, 0.8)' : 'rgba(250, 204, 21, 0.8)';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(xTouchPx - fingerBandPx / 2, 8, fingerBandPx, height - 16);
+        }
+      }
+
+      // Node Match Indicator
+      const domNodeOverlap = modalData.dominantHarmonic.overlapFactor;
+      const nodeMatchPct = Math.max(0, Math.round((1.0 - domNodeOverlap * 2.0) * 100));
+      document.getElementById('label-node-match-indicator').textContent = `ノード適合度: ${nodeMatchPct}% (${modalData.dominantHarmonic.n}倍音)`;
+      document.getElementById('label-node-match-indicator').className = `text-xs font-mono font-bold ${nodeMatchPct > 70 ? 'text-amber-400' : 'text-slate-400'}`;
+
+      // Composite Standing Wave Points Calculation
+      ctx.beginPath();
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = '#38bdf8';
+
+      const points = 120;
+      for (let i = 0; i <= points; i++) {
+        const ratio = i / points;
+        let totalY = 0;
+
+        modalData.harmonics.forEach(h => {
+          if (h.survivingAmp < 0.001) return;
+          const spatialVal = Math.sin(h.n * Math.PI * ratio);
+          const temporalVal = Math.cos(state.waveTime * (h.n * 0.7));
+          totalY += h.survivingAmp * spatialVal * temporalVal * 32.0;
+        });
+
+        const drawX = paddingX + ratio * activeWidth;
+        const drawY = centerY + totalY;
+
+        if (i === 0) ctx.moveTo(drawX, drawY);
+        else ctx.lineTo(drawX, drawY);
+      }
+      ctx.stroke();
+
+      requestAnimationFrame(drawCanvasStringWave);
+    }
+
+    // --- Global Helpers ---
+    window.setBarreFret = function(fretVal, fingerIndex = 0) {
+      state.fingerPositions[fingerIndex] = fretVal;
+      renderApp();
+      playSelectedString();
+    };
+
+    window.playString = function(idx) {
+      state.selectedStringIndex = idx;
+      const modalData = calculateHarmonicModalData(
+        state.strings[idx],
+        state.capo,
+        state.fingerPositions,
+        state.fingerCount,
+        state.fingerWidthMm,
+        state.fingerPressure,
+        state.pickPosRatio,
+        state.stringType,
+        state.pickType,
+        state.instrument,
+        state.pressedFret
+      );
+      synthesizePhysicalHarmonic(modalData, state.instrument === 'bass');
+      renderApp();
+    };
+
+    function playSelectedString() {
+      if (state.selectedStringIndex >= state.strings.length) state.selectedStringIndex = 0;
+      window.playString(state.selectedStringIndex);
+    }
+
+    // --- DOM Render Functions ---
+    function renderApp() {
+      document.getElementById('label-instrument-type').textContent = state.instrument === 'guitar' ? 'Guitar (25.5")' : 'Bass (34" Long)';
+      document.getElementById('btn-inst-guitar').className = `flex-1 sm:flex-initial px-3 py-1.5 rounded-lg transition ${state.instrument === 'guitar' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400'}`;
+      document.getElementById('btn-inst-bass').className = `flex-1 sm:flex-initial px-3 py-1.5 rounded-lg transition ${state.instrument === 'bass' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400'}`;
+
+      const audioBtn = document.getElementById('btn-audio-toggle');
+      audioBtn.className = `px-3 py-1.5 rounded-xl border text-xs font-medium flex items-center gap-1.5 transition ${state.audioEnabled ? 'bg-amber-500/20 border-amber-400 text-amber-300' : 'bg-slate-900 border-slate-700 text-slate-500'}`;
+      audioBtn.innerHTML = `<i class="fa-solid ${state.audioEnabled ? 'fa-volume-high' : 'fa-volume-xmark'}"></i><span class="hidden sm:inline">サウンド</span>`;
+
+      const strBtnContainer = document.getElementById('string-count-buttons');
+      strBtnContainer.innerHTML = '';
+      const counts = state.instrument === 'guitar' ? [6, 7] : [4, 5, 6];
+      counts.forEach(c => {
+        const btn = document.createElement('button');
+        btn.textContent = `${c}弦`;
+        btn.className = `px-2.5 py-1 rounded-lg text-xs transition ${state.stringCount === c ? 'bg-amber-500 text-slate-950 font-bold' : 'bg-slate-700 text-slate-300'}`;
+        btn.onclick = () => {
+          state.stringCount = c;
+          state.selectedStringIndex = 0;
+          applyPreset();
+          renderApp();
+        };
+        strBtnContainer.appendChild(btn);
+      });
+
+      const selectPreset = document.getElementById('select-preset');
+      selectPreset.innerHTML = `
+        <option value="custom" ${state.preset === 'custom' ? 'selected' : ''}>カスタム設定</option>
+        <option value="standard" ${state.preset === 'standard' ? 'selected' : ''}>Standard (レギュラー)</option>
+        <option value="dropD" ${state.preset === 'dropD' ? 'selected' : ''}>Drop D</option>
+        <option value="halfStepDown" ${state.preset === 'halfStepDown' ? 'selected' : ''}>半音下げ</option>
+      `;
+      if (state.instrument === 'guitar') {
+        selectPreset.innerHTML += `
+          <option value="dmajor" ${state.preset === 'dmajor' ? 'selected' : ''}>D Major / Open D</option>
+          <option value="dsus4" ${state.preset === 'dsus4' ? 'selected' : ''}>Dsus4 / DADGAD</option>
+          <option value="openg" ${state.preset === 'openg' ? 'selected' : ''}>Open G</option>
+          <option value="openc" ${state.preset === 'openc' ? 'selected' : ''}>Open C</option>
+        `;
+      }
+
+      document.getElementById('label-capo-val').textContent = state.capo === 0 ? 'なし (0)' : `${state.capo} フレット`;
+      document.getElementById('input-capo').value = state.capo;
+
+      document.getElementById('label-pressed-fret').textContent = state.pressedFret === 0 ? '開放 (0f)' : `${state.pressedFret} フレット押弦`;
+      document.getElementById('input-pressed-fret').value = state.pressedFret;
+
+      document.getElementById('select-string-type').value = state.stringType;
+      document.getElementById('select-pick-type').value = state.pickType;
+      document.getElementById('select-body-type').value = state.bodyType;
+
+      // Render Finger Count Buttons (0, 1, 2, 3)
+      const fingerCountBox = document.getElementById('container-finger-count-buttons');
+      fingerCountBox.innerHTML = '';
+      [0, 1, 2, 3].forEach(cnt => {
+        const btn = document.createElement('button');
+        btn.textContent = cnt === 0 ? '0本(開放)' : `${cnt}本`;
+        btn.className = `py-1 rounded-lg text-xs font-bold font-mono transition ${state.fingerCount === cnt ? 'bg-amber-500 text-slate-950' : 'bg-slate-900 text-slate-400 border border-slate-700'}`;
+        btn.onclick = () => {
+          state.fingerCount = cnt;
+          renderApp();
+          playSelectedString();
+        };
+        fingerCountBox.appendChild(btn);
+      });
+
+      // Render Active Finger Sliders
+      const fingerSlidersContainer = document.getElementById('container-finger-sliders');
+      fingerSlidersContainer.innerHTML = '';
+      if (state.fingerCount === 0) {
+        fingerSlidersContainer.innerHTML = `<div class="text-xs text-slate-400 py-1">開放弦モード：指の摩擦抵抗なし（フルレゾナンス）</div>`;
+      } else {
+        for (let fIdx = 0; fIdx < state.fingerCount; fIdx++) {
+          const row = document.createElement('div');
+          row.className = 'space-y-1 bg-slate-900/60 p-2 rounded-xl border border-slate-700/60';
+          const fPos = state.fingerPositions[fIdx];
+          const badgeColor = fIdx === 0 ? 'text-rose-400 border-rose-400' : fIdx === 1 ? 'text-sky-400 border-sky-400' : 'text-amber-400 border-amber-400';
+
+          row.innerHTML = `
+            <div class="flex justify-between items-center text-xs">
+              <span class="font-bold font-mono border px-1.5 py-0.5 rounded text-[11px] ${badgeColor}">指${fIdx + 1}</span>
+              <span class="font-bold font-mono text-amber-300">+${parseFloat(fPos).toFixed(2)} f</span>
+            </div>
+            <input type="range" min="0" max="28" step="0.05" value="${fPos}" class="slider-f${fIdx} w-full accent-amber-400 cursor-pointer h-2 bg-slate-800 rounded-lg">
+          `;
+          row.querySelector(`.slider-f${fIdx}`).oninput = (e) => {
+            state.fingerPositions[fIdx] = parseFloat(e.target.value);
+            renderApp();
+          };
+          row.querySelector(`.slider-f${fIdx}`).onchange = () => playSelectedString();
+          fingerSlidersContainer.appendChild(row);
+        }
+      }
+
+      // Strings List
+      const stringsContainer = document.getElementById('container-strings-tuning');
+      stringsContainer.innerHTML = '';
+      state.strings.forEach((str, idx) => {
+        const row = document.createElement('div');
+        row.className = 'flex items-center justify-between bg-slate-900/80 px-2 py-0.5 rounded-xl border border-slate-700/60 text-xs';
+        let noteOptions = NOTE_NAMES.map(n => `<option value="${n}" ${str.note === n ? 'selected' : ''}>${n}</option>`).join('');
+        let octOptions = [0,1,2,3,4,5].map(o => `<option value="${o}" ${str.octave === o ? 'selected' : ''}>Oct ${o}</option>`).join('');
+
+        row.innerHTML = `
+          <div class="flex items-center gap-1.5">
+            <span class="font-bold text-slate-400 text-[11px] w-6">${idx + 1}弦</span>
+            <span class="text-[9px] font-mono text-amber-400/80 bg-slate-950 px-1 rounded">${str.gaugeInch}</span>
+          </div>
+          <div class="flex items-center gap-1">
+            <select class="sel-note bg-slate-800 text-amber-300 font-mono rounded px-1 py-0.5 border border-slate-700 focus:outline-none text-[11px]">${noteOptions}</select>
+            <select class="sel-oct bg-slate-800 text-slate-300 font-mono rounded px-1 py-0.5 border border-slate-700 focus:outline-none text-[11px]">${octOptions}</select>
+          </div>
+          <span class="font-mono text-slate-400 text-[11px] w-10 text-right">${getSoundingNoteName(str.note, str.octave, state.capo)}</span>
+        `;
+        row.querySelector('.sel-note').onchange = (e) => { str.note = e.target.value; state.preset = 'custom'; renderApp(); };
+        row.querySelector('.sel-oct').onchange = (e) => { str.octave = parseInt(e.target.value); state.preset = 'custom'; renderApp(); };
+        stringsContainer.appendChild(row);
+      });
+
+      let widthText = `${state.fingerWidthMm.toFixed(1)} mm`;
+      if (state.fingerWidthMm <= 0.5) widthText += " (爪先)";
+      else if (state.fingerWidthMm <= 2.5) widthText += " (点接触)";
+      else if (state.fingerWidthMm >= 8.0) widthText += " (指の腹)";
+      else widthText += " (標準)";
+      document.getElementById('label-finger-width').textContent = widthText;
+
+      let pressureLabel = '適度な軽触';
+      if (state.fingerPressure <= 0.2) pressureLabel = 'ごく微弱';
+      else if (state.fingerPressure >= 1.0) pressureLabel = '消音';
+      document.getElementById('label-finger-pressure').textContent = `${pressureLabel} (${state.fingerPressure})`;
+
+      document.getElementById('label-pick-pos').textContent = state.pickPosRatio >= 0.88 ? 'ブリッジ至近' : state.pickPosRatio <= 0.75 ? 'ネック寄り' : '標準位置';
+
+      renderFretboard();
+      renderSpectrumAnalyzer();
+    }
+
+    function renderFretboard() {
+      // Fret Numbers Header (0 to 24)
+      const numbersRow = document.getElementById('fret-numbers-row');
+      numbersRow.innerHTML = '';
+      
+      const nutDiv = document.createElement('div');
+      nutDiv.className = `absolute left-0 -translate-x-1/2 font-bold font-mono ${state.capo === 0 ? 'text-amber-400' : 'text-slate-600'}`;
+      nutDiv.textContent = state.capo === 0 ? '0' : '-';
+      numbersRow.appendChild(nutDiv);
+
+      for (let f = 1; f <= 24; f++) {
+        const numDiv = document.createElement('div');
+        numDiv.className = 'absolute -translate-x-1/2 font-bold font-mono';
+        
+        // Exact Fret Distance Formula: x/L = 1 - 2^(-f/12)
+        const fretRatio = (1.0 - Math.pow(2, -f / 12.0));
+        numDiv.style.left = `${fretRatio * 100}%`;
+
+        const relFret = f - state.capo;
+        if (f === state.capo) {
+          numDiv.textContent = '0';
+          numDiv.className += ' text-amber-400 bg-amber-500/20 px-1 rounded';
+        } else if (f < state.capo) {
+          numDiv.textContent = '';
+        } else {
+          numDiv.textContent = relFret;
+          const isHighlighted = [3, 5, 7, 9, 12, 15, 17, 19, 21, 24].includes(relFret);
+          numDiv.className += isHighlighted ? ' text-amber-400' : ' text-slate-400';
+        }
+        numbersRow.appendChild(numDiv);
+      }
+
+      // Fret Wires
+      const wiresContainer = document.getElementById('fret-wires-container');
+      wiresContainer.innerHTML = '<div class="absolute left-0 top-0 bottom-0 w-1 bg-amber-200/80"></div>'; // Nut
+      for (let f = 1; f <= 24; f++) {
+        const wire = document.createElement('div');
+        wire.className = 'fret-wire';
+        if (f === state.capo) {
+          wire.style.backgroundColor = '#fbbf24';
+          wire.style.width = '3px';
+        }
+        const fretRatio = (1.0 - Math.pow(2, -f / 12.0));
+        wire.style.left = `${fretRatio * 100}%`;
+        wiresContainer.appendChild(wire);
+      }
+
+      // Inlays (fret 3, 5, 7, 9, 12, 15, 17, 19, 21, 24)
+      const inlaysContainer = document.getElementById('fret-inlays-container');
+      inlaysContainer.innerHTML = '';
+      for (let f = 1; f <= 24; f++) {
+        const prevRatio = f === 1 ? 0 : (1.0 - Math.pow(2, -(f - 1) / 12.0));
+        const curRatio = (1.0 - Math.pow(2, -f / 12.0));
+        const midRatio = (prevRatio + curRatio) / 2.0;
+
+        if ([3,5,7,9,15,17,19,21].includes(f)) {
+          const dot = document.createElement('div');
+          dot.className = 'absolute w-2 h-2 rounded-full bg-slate-700/80 -translate-x-1/2';
+          dot.style.left = `${midRatio * 100}%`;
+          inlaysContainer.appendChild(dot);
+        } else if (f === 12 || f === 24) {
+          const doubleDot = document.createElement('div');
+          doubleDot.className = 'absolute flex flex-col gap-3 -translate-x-1/2';
+          doubleDot.style.left = `${midRatio * 100}%`;
+          doubleDot.innerHTML = '<div class="w-1.5 h-1.5 rounded-full bg-amber-500/60"></div><div class="w-1.5 h-1.5 rounded-full bg-amber-500/60"></div>';
+          inlaysContainer.appendChild(doubleDot);
+        }
+      }
+
+      // Pickups & Bridge Areas (Neck PU @ 82%, Bridge PU @ 90%, Bridge @ 100%)
+      const neckPu = document.createElement('div');
+      neckPu.className = 'absolute top-0 bottom-0 w-4 bg-slate-800 border border-slate-700 rounded z-10 -translate-x-1/2 flex items-center justify-center';
+      neckPu.style.left = '82%';
+      neckPu.innerHTML = '<div class="w-1 h-3/4 bg-slate-600 rounded-full"></div>';
+      inlaysContainer.appendChild(neckPu);
+
+      const bridgePu = document.createElement('div');
+      bridgePu.className = 'absolute top-0 bottom-0 w-4 bg-slate-800 border border-slate-700 rounded z-10 -translate-x-1/2 flex items-center justify-center';
+      bridgePu.style.left = '90%';
+      bridgePu.innerHTML = '<div class="w-1 h-3/4 bg-slate-600 rounded-full"></div>';
+      inlaysContainer.appendChild(bridgePu);
+
+      const bridgeVal = document.createElement('div');
+      bridgeVal.className = 'absolute top-0 bottom-0 w-2.5 bg-slate-500 border border-slate-400 z-10 -translate-x-1/2 rounded-r';
+      bridgeVal.style.left = '100%';
+      inlaysContainer.appendChild(bridgeVal);
+
+      // Render Active Finger Overlay Bands & Drag Handles
+      const fingerBandsContainer = document.getElementById('container-finger-bands-overlay');
+      fingerBandsContainer.innerHTML = '';
+
+      if (state.fingerCount > 0) {
+        for (let fIdx = 0; fIdx < state.fingerCount; fIdx++) {
+          const fPos = state.fingerPositions[fIdx];
+          const absFret = state.capo + fPos;
+          const centerRatio = (1.0 - Math.pow(2, -absFret / 12.0));
+          const widthRatio = (state.fingerWidthMm / 648.0) * 1.5;
+
+          const band = document.createElement('div');
+          band.className = 'absolute top-0 bottom-0 border-x-2 z-20 transition-all duration-75';
+          if (fIdx === 0) band.className += ' bg-rose-500/30 border-rose-400 shadow-[0_0_8px_rgba(244,63,94,0.5)]';
+          else if (fIdx === 1) band.className += ' bg-sky-500/30 border-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.5)]';
+          else band.className += ' bg-amber-500/30 border-amber-400 shadow-[0_0_8px_rgba(250,204,21,0.5)]';
+
+          const leftPct = Math.max(0, (centerRatio - widthRatio / 2.0) * 100);
+          const widthPct = Math.max(0.6, widthRatio * 100);
+
+          band.style.left = `${leftPct}%`;
+          band.style.width = `${widthPct}%`;
+
+          // Handle Badge
+          const handle = document.createElement('div');
+          handle.className = `absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-6 h-6 rounded-full font-bold text-xs flex items-center justify-center shadow-lg border-2 z-30 cursor-grab active:cursor-grabbing ${
+            fIdx === 0 ? 'bg-rose-500 border-rose-200 text-slate-950' : fIdx === 1 ? 'bg-sky-500 border-sky-200 text-slate-950' : 'bg-amber-500 border-amber-200 text-slate-950'
+          }`;
+          handle.style.left = `${centerRatio * 100}%`;
+          handle.textContent = `${fIdx + 1}`;
+
+          fingerBandsContainer.appendChild(band);
+          fingerBandsContainer.appendChild(handle);
+        }
+      }
+
+      // Render Strings
+      const stringsContainer = document.getElementById('fret-strings-container');
+      stringsContainer.innerHTML = '';
+      state.strings.forEach((str, sIdx) => {
+        const strRow = document.createElement('div');
+        strRow.className = 'relative flex items-center h-5 cursor-pointer hover:bg-slate-800/60 rounded transition group';
+        
+        // Exact event handling for each individual string row
+        strRow.onmousedown = (e) => {
+          e.stopPropagation();
+          handleBoardInteraction(e, false, sIdx);
+        };
+        strRow.ontouchstart = (e) => {
+          e.stopPropagation();
+          if (e.touches.length > 0) {
+            handleBoardInteraction(e.touches[0], false, sIdx);
+          }
+        };
+
+        const isSelected = state.selectedStringIndex === sIdx;
+        const labelDiv = document.createElement('div');
+        labelDiv.className = `w-8 text-[10px] font-bold font-mono shrink-0 z-20 transition ${isSelected ? 'text-amber-400 font-extrabold scale-110' : 'text-slate-400 group-hover:text-amber-300'}`;
+        labelDiv.textContent = `${sIdx + 1}弦`;
+        strRow.appendChild(labelDiv);
+
+        const lineContainer = document.createElement('div');
+        lineContainer.className = 'flex-1 relative h-full flex items-center';
+
+        const visualThicknessPx = Math.max(1.0, Math.min(8.5, str.gaugeMm * 2.2));
+
+        const stringLine = document.createElement('div');
+        stringLine.className = `absolute left-0 right-0 rounded transition ${isSelected ? 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]' : 'bg-slate-500/80 group-hover:bg-slate-400'}`;
+        stringLine.style.height = `${visualThicknessPx.toFixed(1)}px`;
+        lineContainer.appendChild(stringLine);
+
+        if (state.capo > 0) {
+          const capoRatio = (1.0 - Math.pow(2, -state.capo / 12.0));
+          const capoBar = document.createElement('div');
+          capoBar.className = 'absolute top-0 bottom-0 w-2 bg-amber-400 z-20 shadow-[0_0_8px_rgba(251,191,36,0.9)] -translate-x-1/2 rounded-sm';
+          capoBar.style.left = `${capoRatio * 100}%`;
+          lineContainer.appendChild(capoBar);
+        }
+
+        strRow.appendChild(lineContainer);
+        stringsContainer.appendChild(strRow);
+      });
+    }
+
+    function renderSpectrumAnalyzer() {
+      const playBtnContainer = document.getElementById('string-play-buttons');
+      playBtnContainer.innerHTML = '';
+      state.strings.forEach((str, idx) => {
+        const isSelected = state.selectedStringIndex === idx;
+        const btn = document.createElement('button');
+        btn.className = `px-3 py-1.5 rounded-xl border text-xs font-mono font-bold flex items-center gap-1.5 transition ${
+          isSelected ? 'bg-amber-500 border-amber-400 text-slate-950 shadow-md' : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500'
+        }`;
+        btn.innerHTML = `<i class="fa-solid fa-play text-[10px]"></i> <span>${idx + 1}弦 (${str.note}${str.octave}) <span class="text-[9px] opacity-75 font-normal">${str.gaugeInch}</span></span>`;
+        btn.onclick = () => window.playString(idx);
+        playBtnContainer.appendChild(btn);
+      });
+
+      const curStr = state.strings[state.selectedStringIndex];
+      const modalData = calculateHarmonicModalData(
+        curStr,
+        state.capo,
+        state.fingerPositions,
+        state.fingerCount,
+        state.fingerWidthMm,
+        state.fingerPressure,
+        state.pickPosRatio,
+        state.stringType,
+        state.pickType,
+        state.instrument,
+        state.pressedFret
+      );
+
+      document.getElementById('label-current-spectrum-string').textContent = `${state.selectedStringIndex + 1}弦 (${curStr.note}${curStr.octave}) の絶対音量スペクトル`;
+      document.getElementById('label-current-string-gauge').textContent = `スケール(${state.instrument === 'bass' ? '34"' : '25.5"'}) / 太さ: ${modalData.gaugeMm} mm (${modalData.gaugeInch})`;
+
+      const barsGrid = document.getElementById('spectrum-bars-grid');
+      barsGrid.innerHTML = '';
+
+      const refMaxEnergy = 0.65;
+
+      modalData.harmonics.forEach(h => {
+        const heightPct = Math.min(100, Math.round((h.survivingEnergy / refMaxEnergy) * 100));
+        const isDominant = h.n === modalData.dominantHarmonic.n;
+        const isAlive = heightPct > 10;
+
+        const col = document.createElement('div');
+        col.className = 'flex flex-col items-center h-full justify-end group relative';
+
+        let barColor = isDominant && heightPct > 12 ? 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.7)]' : isAlive ? 'bg-sky-400' : 'bg-slate-700';
+
+        col.innerHTML = `
+          <div class="hidden group-hover:block absolute bottom-full mb-2 bg-slate-950 border border-slate-700 text-slate-200 text-[10px] p-2 rounded-lg whitespace-nowrap z-50 shadow-2xl font-mono">
+            <div class="font-bold text-amber-300">${h.n}倍音 (${h.freq.toFixed(1)} Hz)</div>
+            <div>実音: <b>${h.noteFormatted}</b></div>
+            <div>絶対音量: <b>${heightPct}%</b></div>
+            <div>剛性・指減衰: <b>${Math.round(h.overlapFactor * 100)}%</b></div>
+          </div>
+          <div class="w-full rounded-t transition-all duration-150 ${barColor}" style="height: ${Math.max(2, heightPct)}%;"></div>
+          <span class="text-[9px] font-mono mt-1 ${isDominant && heightPct > 12 ? 'text-amber-400 font-bold' : 'text-slate-500'}">${h.n}</span>
+        `;
+        barsGrid.appendChild(col);
+      });
+
+      const dom = modalData.dominantHarmonic;
+      const domHeightPct = Math.round((dom.survivingEnergy / refMaxEnergy) * 100);
+      const overallVolumePct = Math.min(100, Math.round((modalData.totalSurvivingEnergy / refMaxEnergy) * 35));
+
+      const summaryBox = document.getElementById('spectrum-summary-box');
+      if (domHeightPct < 10) {
+        summaryBox.innerHTML = `
+          <div class="flex items-center gap-2 text-rose-400">
+            <i class="fa-solid fa-volume-xmark text-base"></i>
+            <span class="font-bold">指の減衰または剛性によりミュートされています</span>
+          </div>
+          <span class="text-slate-400 font-mono text-[11px]">全体音量: <b>${overallVolumePct}%</b></span>
+        `;
+      } else {
+        summaryBox.innerHTML = `
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-full bg-amber-400 inline-block shadow"></span>
+            <span class="text-slate-200">最優勢倍音: <b class="text-amber-300 font-mono text-sm">${dom.n}倍音 (${dom.noteFormatted})</b></span>
+            <span class="text-slate-400 text-[11px] font-mono">(${dom.freq.toFixed(1)} Hz)</span>
+          </div>
+          <div class="text-slate-300 font-mono text-xs flex items-center gap-3">
+            <span>全体実音量: <b class="text-amber-400">${overallVolumePct}%</b></span>
+            <span class="text-slate-400 text-[10px]">スケール補正済</span>
+          </div>
+        `;
+      }
+    }
+
+    // --- Interactive Fretboard Multi-Finger Drag & Tap Pick ---
+    const boardArea = document.getElementById('fretboard-click-area');
+
+    function getFretFromRatio(ratio) {
+      if (ratio <= 0) return 0;
+      if (ratio >= 0.995) return 28.0;
+      const fVal = -12.0 * Math.log2(1.0 - ratio);
+      return Math.min(28.0, Math.max(0, fVal));
+    }
+
+    function handleBoardInteraction(e, isDragMove = false, forcedStringIdx = -1) {
+      const rect = boardArea.getBoundingClientRect();
+      const spacerWidth = 32;
+      const effectiveLeft = rect.left + spacerWidth;
+      const effectiveWidth = rect.width - spacerWidth;
+
+      const clickX = e.clientX - effectiveLeft;
+      let ratio = clickX / effectiveWidth;
+      if (ratio < 0) ratio = 0;
+      if (ratio > 0.995) ratio = 0.995;
+
+      // チェック: ドレーグ中の指ハンドルがあるか
+      if (isDragMove && state.draggingFingerIndex >= 0 && state.draggingFingerIndex < state.fingerCount) {
+        const relFret = getFretFromRatio(ratio);
+        state.fingerPositions[state.draggingFingerIndex] = Math.round(relFret * 20) / 20;
+        renderApp();
+        return;
+      }
+
+      // タップ操作（ピッキング）：指マーク以外の場所をクリック／タップした時
+      if (!isDragMove) {
+        // 指ハンドルの周辺をクリックしたかチェック
+        let clickedFingerIdx = -1;
+        if (state.fingerCount > 0) {
+          for (let fIdx = 0; fIdx < state.fingerCount; fIdx++) {
+            const fPos = state.fingerPositions[fIdx];
+            const absFret = state.capo + fPos;
+            const centerRatio = (1.0 - Math.pow(2, -absFret / 12.0));
+            if (Math.abs(ratio - centerRatio) < 0.035) {
+              clickedFingerIdx = fIdx;
+              break;
+            }
+          }
+        }
+
+        if (clickedFingerIdx >= 0) {
+          state.draggingFingerIndex = clickedFingerIdx;
+        } else {
+          // タップされた弦を正確に選択
+          if (forcedStringIdx >= 0 && forcedStringIdx < state.strings.length) {
+            state.selectedStringIndex = forcedStringIdx;
+          }
+
+          // ピッキング位置を設定
+          state.pickPosRatio = Math.max(0.05, Math.min(0.99, ratio));
+
+          // ピッキング位置フラッシュラインを表示
+          const flashLine = document.getElementById('pluck-flash-line');
+          if (flashLine) {
+            flashLine.style.left = `${ratio * 100}%`;
+            flashLine.style.opacity = '1';
+            setTimeout(() => { flashLine.style.opacity = '0'; }, 220);
+          }
+
+          document.getElementById('label-last-pluck-pos').textContent = `ピッキング位置: ブリッジ寄り (${(ratio * 100).toFixed(0)}%)`;
+
+          window.playString(state.selectedStringIndex);
+        }
+      }
+    }
+
+    boardArea.addEventListener('mousedown', (e) => {
+      handleBoardInteraction(e, false);
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (state.draggingFingerIndex >= 0) {
+        handleBoardInteraction(e, true);
+      }
+    });
+    window.addEventListener('mouseup', () => {
+      if (state.draggingFingerIndex >= 0) {
+        state.draggingFingerIndex = -1;
+        playSelectedString();
+      }
+    });
+
+    boardArea.addEventListener('touchstart', (e) => {
+      if (e.touches.length > 0) handleBoardInteraction(e.touches[0], false);
+    }, { passive: true });
+    window.addEventListener('touchmove', (e) => {
+      if (state.draggingFingerIndex >= 0 && e.touches.length > 0) {
+        handleBoardInteraction(e.touches[0], true);
+      }
+    }, { passive: true });
+    window.addEventListener('touchend', () => {
+      if (state.draggingFingerIndex >= 0) {
+        state.draggingFingerIndex = -1;
+        playSelectedString();
+      }
+    });
+
+    // --- Global Event Listeners ---
+    document.getElementById('btn-inst-guitar').onclick = () => {
+      state.instrument = 'guitar';
+      state.stringCount = 6;
+      state.selectedStringIndex = 0;
+      applyPreset();
+      renderApp();
+    };
+    document.getElementById('btn-inst-bass').onclick = () => {
+      state.instrument = 'bass';
+      state.stringCount = 4;
+      state.selectedStringIndex = 0;
+      applyPreset();
+      renderApp();
+    };
+    document.getElementById('btn-audio-toggle').onclick = () => {
+      state.audioEnabled = !state.audioEnabled;
+      renderApp();
+    };
+    document.getElementById('select-preset').onchange = (e) => {
+      state.preset = e.target.value;
+      applyPreset();
+      renderApp();
+    };
+    document.getElementById('input-capo').oninput = (e) => {
+      state.capo = parseInt(e.target.value);
+      renderApp();
+    };
+    document.getElementById('input-pressed-fret').oninput = (e) => {
+      state.pressedFret = parseInt(e.target.value);
+      renderApp();
+      playSelectedString();
+    };
+
+    document.getElementById('select-string-type').onchange = (e) => {
+      state.stringType = e.target.value;
+      renderApp();
+      playSelectedString();
+    };
+    document.getElementById('select-pick-type').onchange = (e) => {
+      state.pickType = e.target.value;
+      renderApp();
+      playSelectedString();
+    };
+    document.getElementById('select-body-type').onchange = (e) => {
+      state.bodyType = e.target.value;
+      renderApp();
+      playSelectedString();
+    };
+
+    document.getElementById('input-finger-width').oninput = (e) => {
+      state.fingerWidthMm = parseFloat(e.target.value);
+      renderApp();
+    };
+    document.getElementById('input-finger-width').onchange = () => playSelectedString();
+
+    document.getElementById('input-finger-pressure').oninput = (e) => {
+      state.fingerPressure = parseFloat(e.target.value);
+      renderApp();
+    };
+    document.getElementById('input-finger-pressure').onchange = () => playSelectedString();
+
+    document.getElementById('input-pick-pos').oninput = (e) => {
+      state.pickPosRatio = parseFloat(e.target.value);
+      renderApp();
+    };
+    document.getElementById('input-pick-pos').onchange = () => playSelectedString();
+
+    document.getElementById('btn-strum-all').onclick = () => {
+      const strumInterval = state.instrument === 'bass' ? 36 : 28;
+      state.strings.forEach((str, sIdx) => {
+        setTimeout(() => {
+          const modalData = calculateHarmonicModalData(
+            str,
+            state.capo,
+            state.fingerPositions,
+            state.fingerCount,
+            state.fingerWidthMm,
+            state.fingerPressure,
+            state.pickPosRatio,
+            state.stringType,
+            state.pickType,
+            state.instrument,
+            state.pressedFret
+          );
+          synthesizePhysicalHarmonic(modalData, state.instrument === 'bass');
+        }, sIdx * strumInterval);
+      });
+    };
+
+    // Initial Render & Start Canvas Animation Loop
+    applyPreset();
+    renderApp();
+    requestAnimationFrame(drawCanvasStringWave);
+  </script>
+</body>
+</html>
