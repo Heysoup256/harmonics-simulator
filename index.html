@@ -1267,20 +1267,25 @@
               <button class="btn-add-f${fIdx} px-2 py-1 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 rounded text-[10px] font-mono text-slate-300 font-bold border border-slate-700 active:scale-95 transition">+0.1</button>
             </div>
           `;
+          // スライダー操作中はDOMを破棄せず、非破壊で指板位置・ラベル・スペクトルを60fps同期
           row.querySelector(`.slider-f${fIdx}`).oninput = (e) => {
-            state.fingerPositions[fIdx] = parseFloat(e.target.value);
-            renderApp();
+            updateFingerPositionsFromValue(fIdx, parseFloat(e.target.value));
           };
-          row.querySelector(`.slider-f${fIdx}`).onchange = () => playSelectedString();
+          row.querySelector(`.slider-f${fIdx}`).onchange = () => {
+            saveStateToLocalStorage();
+            playSelectedString();
+          };
 
           row.querySelector(`.btn-sub-f${fIdx}`).onclick = () => {
-            state.fingerPositions[fIdx] = Math.max(0, Math.round((state.fingerPositions[fIdx] - 0.1) * 20) / 20);
-            renderApp();
+            const nextVal = Math.max(0, Math.round((state.fingerPositions[fIdx] - 0.1) * 20) / 20);
+            updateFingerPositionsFromValue(fIdx, nextVal);
+            saveStateToLocalStorage();
             playSelectedString();
           };
           row.querySelector(`.btn-add-f${fIdx}`).onclick = () => {
-            state.fingerPositions[fIdx] = Math.min(28, Math.round((state.fingerPositions[fIdx] + 0.1) * 20) / 20);
-            renderApp();
+            const nextVal = Math.min(28, Math.round((state.fingerPositions[fIdx] + 0.1) * 20) / 20);
+            updateFingerPositionsFromValue(fIdx, nextVal);
+            saveStateToLocalStorage();
             playSelectedString();
           };
           fingerSlidersContainer.appendChild(row);
@@ -1527,9 +1532,10 @@
             handle.style.left = `${centerRatio * 100}%`;
             handle.textContent = `${fIdx + 1}`;
 
-            // Pointer Eventsによる極上な滑らかドラッグ（確実にポインタを捕捉）
+            // Pointer Eventsによる極上な滑らかドラッグ（確実にポインタを捕捉・PC/スマホ両対応）
             handle.onpointerdown = (e) => {
               e.stopPropagation();
+              if (e.cancelable) e.preventDefault();
               state.draggingFingerIndex = fIdx;
               try { e.target.setPointerCapture(e.pointerId); } catch(err) {}
             };
@@ -1544,14 +1550,14 @@
                 e.stopPropagation();
                 state.draggingFingerIndex = -1;
                 try { e.target.releasePointerCapture(e.pointerId); } catch(err) {}
-                renderApp();
+                saveStateToLocalStorage();
                 playSelectedString();
               }
             };
             handle.onpointercancel = (e) => {
               if (state.draggingFingerIndex === fIdx) {
                 state.draggingFingerIndex = -1;
-                renderApp();
+                saveStateToLocalStorage();
               }
             };
 
@@ -1561,21 +1567,12 @@
       }
     }
 
-    // ドラッグ中の超高速・非破壊DOM更新（表面要素基準の100%正確な座標計算）
-    function handleFingerPointerDrag(clientX, fIdx) {
-      const surface = document.getElementById('fretboard-board-surface');
-      if (!surface) return;
-      const rect = surface.getBoundingClientRect();
-      const clickX = clientX - rect.left;
-      let ratio = Math.max(0, Math.min(0.995, clickX / rect.width));
-
-      // 正確な対数フレット計算（0フレット固定バグを根絶）
-      const absFret = -12.0 * Math.log2(1.0 - ratio);
-      const relFret = Math.max(0, Math.min(28, absFret - state.capo));
-      const roundedFret = Math.round(relFret * 20) / 20;
+    // 値から指位置・指板DOM・スライダー・スペクトルを高速非破壊同期
+    function updateFingerPositionsFromValue(fIdx, newFretVal) {
+      const roundedFret = Math.max(0, Math.min(28, Math.round(newFretVal * 20) / 20));
       state.fingerPositions[fIdx] = roundedFret;
 
-      // 指バンド・指ハンドルの位置を直接更新
+      // 指バンド・指ハンドルの位置を直接更新（DOM非破壊）
       const fullScale = state.instrument === 'bass' ? 864.0 : 648.0;
       const actualAbsFret = state.capo + roundedFret;
       const centerRatio = (1.0 - Math.pow(2, -actualAbsFret / 12.0));
@@ -1592,13 +1589,29 @@
       }
       if (handle) handle.style.left = `${centerRatio * 100}%`;
 
-      // スライダー表示のリアルタイム同期
+      // スライダー数値ラベルとスライダー本体のリアルタイム同期
       const sliderValLabel = document.getElementById(`label-fpos-${fIdx}`);
       if (sliderValLabel) sliderValLabel.textContent = `+${roundedFret.toFixed(2)} f`;
       const sliderEl = document.querySelector(`.slider-f${fIdx}`);
-      if (sliderEl) sliderEl.value = roundedFret;
+      if (sliderEl && Math.abs(parseFloat(sliderEl.value) - roundedFret) > 0.04) {
+        sliderEl.value = roundedFret;
+      }
 
       renderSpectrumAnalyzer();
+    }
+
+    // 指板上のドラッグ座標から指位置を更新
+    function handleFingerPointerDrag(clientX, fIdx) {
+      const surface = document.getElementById('fretboard-board-surface');
+      if (!surface) return;
+      const rect = surface.getBoundingClientRect();
+      const clickX = clientX - rect.left;
+      let ratio = Math.max(0, Math.min(0.995, clickX / rect.width));
+
+      // 正確な対数フレット計算（0フレット固定バグを根絶）
+      const absFret = -12.0 * Math.log2(1.0 - ratio);
+      const relFret = Math.max(0, Math.min(28, absFret - state.capo));
+      updateFingerPositionsFromValue(fIdx, relFret);
     }
 
     function renderSpectrumAnalyzer() {
