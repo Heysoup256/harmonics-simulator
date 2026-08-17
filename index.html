@@ -142,13 +142,14 @@
           <div class="space-y-1">
             <div class="flex justify-between items-center text-xs">
               <label class="text-slate-300 font-medium">指の接触幅（肉厚）</label>
-              <span id="label-finger-width" class="text-amber-400 font-bold font-mono">1.5 mm (爪先)</span>
+              <span id="label-finger-width" class="text-amber-400 font-bold font-mono">3.0 mm (標準)</span>
             </div>
-            <input id="input-finger-width" type="range" min="0.1" max="12.0" step="0.1" value="1.5" class="w-full accent-amber-400 cursor-pointer h-2 bg-slate-900 rounded-lg">
+            <input id="input-finger-width" type="range" min="0.1" max="12.0" step="0.1" value="3.0" class="w-full accent-amber-400 cursor-pointer h-2 bg-slate-900 rounded-lg">
             <div class="flex justify-between text-[9px] text-slate-500 font-mono">
-              <span>爪先 (0.1mm)</span>
-              <span>点接触 (1.5mm)</span>
-              <span>指の腹 (12mm)</span>
+              <span>0.1mm (爪先)</span>
+              <span>3.0mm (標準)</span>
+              <span>6.0mm (広め)</span>
+              <span>12.0mm (指の腹)</span>
             </div>
           </div>
 
@@ -322,7 +323,7 @@
 
       fingerCount: 1, // 0, 1, 2, 3
       fingerPositions: [12.0, 7.0, 5.0], // 指1, 指2, 指3 のフレット位置
-      fingerWidthMm: 1.5,
+      fingerWidthMm: 3.0, // デフォルト: 3.0mm
       fingerPressure: 0.5,
       pickPosRatio: 0.85,
       bodyType: 'standard', // 'bright' | 'standard' | 'warm'
@@ -1113,15 +1114,21 @@
 
       let widthText = `${state.fingerWidthMm.toFixed(1)} mm`;
       if (state.fingerWidthMm <= 0.5) widthText += " (爪先)";
-      else if (state.fingerWidthMm <= 2.5) widthText += " (点接触)";
-      else if (state.fingerWidthMm >= 8.0) widthText += " (指の腹)";
-      else widthText += " (標準)";
+      else if (state.fingerWidthMm <= 1.8) widthText += " (点接触)";
+      else if (state.fingerWidthMm <= 4.5) widthText += " (標準)";
+      else if (state.fingerWidthMm <= 8.5) widthText += " (広め)";
+      else widthText += " (指の腹)";
       document.getElementById('label-finger-width').textContent = widthText;
 
       let pressureLabel = '適度な軽触';
       if (state.fingerPressure <= 0.2) pressureLabel = 'ごく微弱';
       else if (state.fingerPressure >= 1.0) pressureLabel = '消音';
       document.getElementById('label-finger-pressure').textContent = `${pressureLabel} (${state.fingerPressure})`;
+
+      const pickPosLabel = document.getElementById('label-pick-pos');
+      if (pickPosLabel) {
+        pickPosLabel.textContent = state.pickPosRatio >= 0.88 ? 'ブリッジ至近' : state.pickPosRatio <= 0.75 ? 'ネック寄り' : '標準位置';
+      }
 
       renderFretboard();
       renderSpectrumAnalyzer();
@@ -1215,15 +1222,19 @@
       inlaysContainer.appendChild(bridgeVal);
 
       // Render Active Finger Overlay Bands & Drag Handles
+      // ベース（864mm）とギター（648mm）の弦長スケール比率を正確に反映
       const fingerBandsContainer = document.getElementById('container-finger-bands-overlay');
       fingerBandsContainer.innerHTML = '';
+
+      const fullScaleLengthMm = state.instrument === 'bass' ? 864.0 : 648.0;
 
       if (state.fingerCount > 0) {
         for (let fIdx = 0; fIdx < state.fingerCount; fIdx++) {
           const fPos = state.fingerPositions[fIdx];
           const absFret = state.capo + fPos;
           const centerRatio = (1.0 - Math.pow(2, -absFret / 12.0));
-          const widthRatio = (state.fingerWidthMm / 648.0) * 1.5;
+          // スケール長（ベース: 864mm, ギター: 648mm）に対する指接触幅の正確な物理比率
+          const widthRatio = state.fingerWidthMm / fullScaleLengthMm;
 
           const band = document.createElement('div');
           band.className = 'absolute top-0 bottom-0 border-x-2 z-20 transition-all duration-75';
@@ -1232,7 +1243,7 @@
           else band.className += ' bg-amber-500/30 border-amber-400 shadow-[0_0_8px_rgba(250,204,21,0.5)]';
 
           const leftPct = Math.max(0, (centerRatio - widthRatio / 2.0) * 100);
-          const widthPct = Math.max(0.6, widthRatio * 100);
+          const widthPct = Math.max(0.4, widthRatio * 100);
 
           band.style.left = `${leftPct}%`;
           band.style.width = `${widthPct}%`;
