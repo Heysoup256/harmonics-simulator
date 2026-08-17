@@ -670,22 +670,38 @@
         const energyAtAudible = baseInitialAmp * Math.exp(-totalGamma * 0.10);
         totalSurvivingEnergy += energyAtAudible;
 
-        // 1フレット付近（ナット至近）での1/2半音（約+50セント）ピッチシフト物理モデル:
-        // ナット〜指間が遮断され、指〜ブリッジ間（約94.4%の弦長）が主振動体となり、さらに微小張力増加が発生
-        let nutTouchShiftCents = 0;
+        // ============================================================
+        // 普遍的連続接触力学（Unified Continuous Contact Mechanics）
+        // 任意の接触位置 xi における「幾何学的歪みによる張力変調」と「非対称区間モード結合」
+        // ※ 0〜2fなどの条件分岐や範囲制限は一切使わず、連続力学方程式のみで記述
+        // ============================================================
+        let totalContinuousContactPitchShiftCents = 0;
+
         if (activeFingerCount > 0) {
           for (let fIdx = 0; fIdx < activeFingerCount; fIdx++) {
-            const fPos = fingerPositionsArray[fIdx];
-            if (fPos >= 0.2 && fPos <= 2.2) {
-              const proximity = Math.max(0, 1.0 - Math.abs(fPos - 1.0) / 1.0);
-              const plainStringFactor = Math.max(0, (0.55 - gaugeMm) / 0.32); // 1,2,3弦などのプレーン弦ほど顕著
-              nutTouchShiftCents += 54.0 * proximity * (0.30 + 0.70 * plainStringFactor);
-            }
+            const barreFretRel = fingerPositionsArray[fIdx];
+            const touchFretDist = Math.max(0.005, barreFretRel - pressedFret);
+            // 接触位置比率 xi (ナット=0, ブリッジ=1)
+            const xi = Math.max(0.002, Math.min(0.998, 1.0 - Math.pow(2, -touchFretDist / 12.0)));
+
+            // 1. 幾何学的伸びによる張力増加率: Delta T / T0 = (E A Delta y^2) / (2 T0 L^2 * (xi * (1 - xi) + epsilon))
+            const epsilon = 0.0012; // 有限接触幅正則化項
+            const plainStringStiffness = Math.max(0.25, (0.65 - gaugeMm) / 0.40); // プレーン弦ほどヤング率寄与大
+            const geoStrainCents = (1.85 * Math.pow(fingerPressure, 1.25) * plainStringStiffness) / (xi * (1.0 - xi) + epsilon);
+
+            // 2. 指による弦の2区間分割における長区間モード非対称結合 (Sub-segment Asymmetric Mode Coupling)
+            // 端点近傍では短区間が超高域へシフトしてミュートされ、長区間 (1-xi)L のモードへ連続遷移する
+            const lengthShorteningRatio = 1.0 / (1.0 - xi);
+            const rawSubsegmentShiftCents = 1200.0 * Math.log2(lengthShorteningRatio);
+            const asymmetricCouplingFactor = (Math.pow(fingerPressure, 0.9) * Math.exp(-3.6 * xi)) / (1.0 + 8.0 * xi);
+            const segmentCouplingCents = rawSubsegmentShiftCents * asymmetricCouplingFactor * plainStringStiffness;
+
+            totalContinuousContactPitchShiftCents += (geoStrainCents + segmentCouplingCents);
           }
         }
 
-        // n倍音のインハーモニシティ ＋ 端点タッチピッチシフト計算
-        const inharmonicFreq = n * f0_prime * Math.sqrt(1.0 + B * n * n) * Math.pow(2, nutTouchShiftCents / 1200.0);
+        // n倍音のインハーモニシティ ＋ 普遍的連続接触ピッチ変調
+        const inharmonicFreq = n * f0_prime * Math.sqrt(1.0 + B * n * n) * Math.pow(2, totalContinuousContactPitchShiftCents / 1200.0);
         const midiVal = baseMidi + 12.0 * Math.log2(inharmonicFreq / f_target);
 
         harmonics.push({
