@@ -532,26 +532,34 @@
       return audioCtx;
     }
 
-    // 共有マスターバス（マスタリングコンプレッサー＋マスターリミッター）
+    // 共有マスターバス（サブソニックフィルター＋マスタリングコンプレッサー＋マスターリミッター）
     function getMasterBus(ctx) {
       if (masterBus && masterBus.ctx === ctx) return masterBus;
 
       const input = ctx.createGain();
       input.gain.setValueAtTime(1.0, ctx.currentTime);
 
+      // サブソニックフィルター (超低域の直流成分・爆発的飽和をカット)
+      const subFilter = ctx.createBiquadFilter();
+      subFilter.type = 'highpass';
+      subFilter.frequency.setValueAtTime(26.0, ctx.currentTime);
+      subFilter.Q.setValueAtTime(0.707, ctx.currentTime);
+
+      // マスタリング用コンプレッサー
       const comp = ctx.createDynamicsCompressor();
-      comp.threshold.setValueAtTime(-12.0, ctx.currentTime);
-      comp.knee.setValueAtTime(8.0, ctx.currentTime);
-      comp.ratio.setValueAtTime(8.0, ctx.currentTime);
-      comp.attack.setValueAtTime(0.003, ctx.currentTime);
-      comp.release.setValueAtTime(0.12, ctx.currentTime);
+      comp.threshold.setValueAtTime(-14.0, ctx.currentTime);
+      comp.knee.setValueAtTime(6.0, ctx.currentTime);
+      comp.ratio.setValueAtTime(6.0, ctx.currentTime);
+      comp.attack.setValueAtTime(0.002, ctx.currentTime);
+      comp.release.setValueAtTime(0.08, ctx.currentTime);
 
       const clipper = createSoftClipper(ctx);
 
       const masterOut = ctx.createGain();
-      masterOut.gain.setValueAtTime(0.78, ctx.currentTime);
+      masterOut.gain.setValueAtTime(0.62, ctx.currentTime);
 
-      input.connect(comp);
+      input.connect(subFilter);
+      subFilter.connect(comp);
       comp.connect(clipper);
       clipper.connect(masterOut);
       masterOut.connect(ctx.destination);
@@ -567,8 +575,8 @@
       const now = ctx.currentTime;
       toKill.forEach(v => {
         try {
-          v.masterGain.gain.setTargetAtTime(0.00001, now, 0.020);
-          setTimeout(() => { try { v.masterGain.disconnect(); } catch(e) {} }, 100);
+          v.masterGain.gain.setTargetAtTime(0.00001, now, 0.015);
+          setTimeout(() => { try { v.masterGain.disconnect(); } catch(e) {} }, 80);
         } catch(e) {}
       });
     }
@@ -579,7 +587,7 @@
       const curve = new Float32Array(n);
       for (let i = 0; i < n; i++) {
         const x = (i / (n - 1)) * 2.0 - 1.0;
-        curve[i] = Math.tanh(2.0 * x) / Math.tanh(2.0);
+        curve[i] = Math.tanh(1.8 * x) / Math.tanh(1.8);
       }
       const ws = ctx.createWaveShaper();
       ws.curve = curve;
@@ -597,12 +605,12 @@
         const f = bodyType === 'warm' ? 95 : bodyType === 'bright' ? 140 : 115;
         lowBody.frequency.setValueAtTime(f, now);
         lowBody.Q.setValueAtTime(1.1, now);
-        lowBody.gain.setValueAtTime(4.0, now);
+        lowBody.gain.setValueAtTime(3.5, now);
       } else {
         const f = stringType === 'acoustic' ? 120 : 180;
         lowBody.frequency.setValueAtTime(f, now);
         lowBody.Q.setValueAtTime(1.0, now);
-        lowBody.gain.setValueAtTime(3.0, now);
+        lowBody.gain.setValueAtTime(2.8, now);
       }
 
       const midBody = ctx.createBiquadFilter();
@@ -611,11 +619,11 @@
         const f = bodyType === 'warm' ? 380 : bodyType === 'bright' ? 620 : 480;
         midBody.frequency.setValueAtTime(f, now);
         midBody.Q.setValueAtTime(0.9, now);
-        midBody.gain.setValueAtTime(2.2, now);
+        midBody.gain.setValueAtTime(2.0, now);
       } else {
         midBody.frequency.setValueAtTime(stringType === 'acoustic' ? 450 : 800, now);
         midBody.Q.setValueAtTime(0.8, now);
-        midBody.gain.setValueAtTime(1.8, now);
+        midBody.gain.setValueAtTime(1.6, now);
       }
 
       lowBody.connect(midBody);
@@ -634,12 +642,12 @@
       const gaugeMm  = modalData.gaugeMm;
       const gaugeFactor = gaugeMm / 0.23;
 
-      // 全倍音中の最長可聴サステイン
+      // 弦楽器本来の自然なサステイン（ギター：最大4.2秒、ベース：最大5.8秒）
       let longestDecay = 0.05;
       modalData.harmonics.forEach(h => {
         if (h.decayTimeSec > longestDecay) longestDecay = h.decayTimeSec;
       });
-      const maxDecaySec = Math.min(isBass ? 9.5 : 7.0, longestDecay);
+      const maxDecaySec = Math.min(isBass ? 5.8 : 4.2, longestDecay * 0.95);
 
       // ---- アタックタイム (指やピックの弦離れ解放時間 1.5〜3.5ms) ----
       let attackMs;
@@ -655,10 +663,13 @@
       }
       const attackTime = Math.max(0.001, attackMs / 1000);
 
-      // ---- ボイスゲイン: 弦の総運動エネルギーに基づくスケーリング ----
-      const gaugeVol = Math.pow(gaugeFactor, 0.25);
-      const bassWeight = isBass ? 1.45 : 1.0;
-      const voiceGainVal = Math.min(0.22, 0.085 * gaugeVol * bassWeight);
+      // ---- ボイスゲイン: 物理エネルギー保存則に基づく動的ヘッドルームスケーリング ----
+      // 全弦ストローク時や複数弦同時発音時、1弦当たりのエネルギーを自動分散（爆発音・飽和の完全防止）
+      const activeCount = activeVoices.length;
+      const headroomScale = 1.0 / Math.sqrt(1.0 + 0.50 * activeCount);
+      const gaugeVol = Math.pow(gaugeFactor, 0.22);
+      const bassWeight = isBass ? 1.25 : 1.0;
+      const voiceGainVal = Math.min(0.18, 0.072 * gaugeVol * bassWeight * headroomScale);
 
       const masterGain = ctx.createGain();
       masterGain.gain.setValueAtTime(voiceGainVal, now);
@@ -669,7 +680,7 @@
 
       const matLPF = ctx.createBiquadFilter();
       matLPF.type = 'lowpass';
-      const openLPFCutoff = isBass ? 9000 : {nylon: 4500, acoustic: 8500, electric: 12000}[state.stringType] || 10000;
+      const openLPFCutoff = isBass ? 8500 : {nylon: 4500, acoustic: 8000, electric: 11000}[state.stringType] || 9500;
       matLPF.frequency.setValueAtTime(openLPFCutoff, now);
       matLPF.Q.setValueAtTime(0.707, now);
 
@@ -680,34 +691,31 @@
       matLPF.connect(clipper);
       clipper.connect(mb.input); // 共有マスターバスへ接続
 
-      // ① 非線形張力変動（Tension Modulation Pitch Glide）の物理パラメータ
-      // 弦を強くピッキングした瞬間の張力増加による初期ピッチ上昇量（セント）
+      // ① 非線形張力変動（Tension Modulation Pitch Glide）
       const isHarmonic = modalData.dominantHarmonic.n > 1;
-      const tensionGlideCents = (isBass ? 16.0 : 9.0) * (isHarmonic ? 0.20 : 1.0) * (state.pickType === 'nail' ? 0.75 : state.pickType === 'pick' ? 1.0 : 1.35);
-      const tensionTau = isBass ? 0.085 : 0.055; // 張力緩和の時定数
+      const tensionGlideCents = (isBass ? 14.0 : 8.0) * (isHarmonic ? 0.20 : 1.0) * (state.pickType === 'nail' ? 0.75 : state.pickType === 'pick' ? 1.0 : 1.30);
+      const tensionTau = isBass ? 0.080 : 0.050;
 
       // ④ フレット衝突力学（String-Fret Collision Dynamics / Buzz）
-      // 開放弦や低いフレットで強くピッキングした瞬間の微小バウンシング過渡音
       if (!isHarmonic && state.pickType !== 'nail') {
-        const fretCollisionDur = isBass ? 0.008 : 0.005;
+        const fretCollisionDur = isBass ? 0.007 : 0.004;
         const collSampleCount = Math.floor(ctx.sampleRate * fretCollisionDur);
         const collBuf = ctx.createBuffer(1, collSampleCount, ctx.sampleRate);
         const collData = collBuf.getChannelData(0);
         for (let i = 0; i < collSampleCount; i++) {
           const t = i / collSampleCount;
-          // フレット衝突インパルストレイン
-          collData[i] = (Math.random() * 2.0 - 1.0) * Math.exp(-t * 22.0) * 0.15;
+          collData[i] = (Math.random() * 2.0 - 1.0) * Math.exp(-t * 24.0) * 0.12;
         }
         const collSource = ctx.createBufferSource();
         collSource.buffer = collBuf;
         const collFilter = ctx.createBiquadFilter();
         collFilter.type = 'highpass';
-        collFilter.frequency.setValueAtTime(isBass ? 2800 : 3800, now);
+        collFilter.frequency.setValueAtTime(isBass ? 3000 : 4000, now);
         const collGain = ctx.createGain();
-        collGain.gain.setValueAtTime(0.015 * Math.pow(gaugeFactor, 0.2), now);
+        collGain.gain.setValueAtTime(0.012, now);
         collSource.connect(collFilter);
         collFilter.connect(collGain);
-        collGain.connect(mb.input);
+        collGain.connect(masterGain); // masterGain 配下に安全に接続
         collSource.start(now);
         collSource.stop(now + fretCollisionDur);
       }
@@ -716,21 +724,20 @@
       modalData.harmonics.forEach((h, idx) => {
         if (h.initialAmp < 0.0001) return;
 
-        // ベースの低次モードエネルギー補正
         let massBoost = 1.0;
         if (isBass) {
-          if (h.n === 1) massBoost = 1.25;
-          else if (h.n === 2) massBoost = 1.15;
-          else if (h.n === 3) massBoost = 1.08;
+          if (h.n === 1) massBoost = 1.20;
+          else if (h.n === 2) massBoost = 1.12;
+          else if (h.n === 3) massBoost = 1.06;
         }
 
-        const peak = Math.min(0.95, h.initialAmp * massBoost * 1.25);
+        const peak = Math.min(0.92, h.initialAmp * massBoost * 1.20);
         const hDecay = Math.min(maxDecaySec, Math.max(0.020, h.decayTimeSec));
 
-        // ① 非線形張力変動ピッチグライドの適用
+        // ① 非線形張力変動ピッチグライド
         const startFreq = h.freq * Math.pow(2, (tensionGlideCents / Math.sqrt(h.n)) / 1200.0);
 
-        // ②-A 垂直偏光モード (Vertical Polarization: ボディに結合して速く減衰)
+        // ②-A 垂直偏光モード (Vertical)
         const oscV = ctx.createOscillator();
         const gainV = ctx.createGain();
         oscV.type = 'sine';
@@ -746,8 +753,7 @@
         oscV.start(now);
         oscV.stop(now + hDecay + 0.1);
 
-        // ②-B 水平偏光モード (Horizontal Polarization: 微小周波数差と長サステインによる天然の位相ゆらぎ)
-        // ブリッジの直交異方性による微小離調 Δf = 0.08Hz
+        // ②-B 水平偏光モード (Horizontal: 微小離調と長サステイン)
         const beatingOffsetHz = (0.04 + 0.02 * (h.n % 3)) * (isBass ? 0.8 : 1.2);
         const oscH = ctx.createOscillator();
         const gainH = ctx.createGain();
