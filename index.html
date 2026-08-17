@@ -615,47 +615,45 @@
             const touchFretDist = Math.max(0.005, barreFretRel - pressedFret);
             const x_touch = L_prime * (1.0 - Math.pow(2, -touchFretDist / 12.0));
 
-            // 点接触振幅近似（Point-Contact Amplitude Approximation）:
-            // 指の皮膚が弦に加える制動力は、接触点における弦の瞬時変位振幅に比例する。
-            // 節（ノード: sin=0）では弦の変位がゼロのため指が反力を受けず倍音は透過する。
-            // 腹（アンチノード: sin=1）では弦の変位が最大のため最大の制動力を受ける。
+            // ① 接触点における変位振幅（Displacement Amplitude at Contact Point）:
+            // 指が弦の変位を拘束する効果。初期励起の境界条件に影響する。
+            // 節（sin=0）→ 弦が動かないため指に拘束されず倍音は完全に透過
+            // 腹（sin=1）→ 弦の変位が最大、指が強く拘束しモードを抑制
             const pointAmplitude = Math.abs(Math.sin(kn * x_touch));
 
-            // 指の有限接触幅による補正:
-            // 指の皮膚は点ではなく幅 w を持つ。節点の直上であっても、指の端が節の隣の山に
-            // わずかにかかるため、完全にゼロにはならない。
+            // ② 指の有限接触幅における sin² 積分平均（Energy Dissipation Overlap）:
+            // 時間領域の減衰率 γ は散逸パワー P = F·v ∝ v² ∝ sin²(kn·x) に比例する。
+            // 指の有限幅 w にわたる平均を取る。
             const x1 = Math.max(0, x_touch - w / 2.0);
             const x2 = Math.min(L_prime, x_touch + w / 2.0);
             const effectiveW = Math.max(0.00005, x2 - x1);
             const integralVal = ((x2 / 2.0) - Math.sin(2.0 * kn * x2) / (4.0 * kn)) - 
                                 ((x1 / 2.0) - Math.sin(2.0 * kn * x1) / (4.0 * kn));
-            const widthCorrection = Math.max(0, Math.min(1.0, integralVal / effectiveW));
+            const energyOverlap = Math.max(0, Math.min(1.0, integralVal / effectiveW));
 
-            // ハイブリッド接触係数: 点接触振幅を主体に、有限幅補正で下限を設定
-            const overlapFactor = Math.max(widthCorrection, pointAmplitude);
-            
-            // 物理力学: 弦の線密度慣性力と指の皮膚粘弾性抵抗（350/s）
-            // 弦の線密度 μ ∝ d² なので慣性抵抗は gaugeFactor^1.60 に比例
-            // 6弦(0.46mm): inertiaResistance ≈ 3.03, 1弦(0.23mm): 1.0
+            // 弦の線密度慣性力: μ ∝ d² → 慣性抵抗 ∝ gaugeFactor^1.60
             const inertiaResistance = Math.pow(gaugeFactor, 1.60);
-            const fingerDamping = (skinNonlinearFactor * overlapFactor * 350.0) / inertiaResistance;
+
+            // 時間領域減衰率 γ_finger [1/s]: sin² 依存（エネルギー散逸物理）
+            const fingerDamping = (skinNonlinearFactor * energyOverlap * 350.0) / inertiaResistance;
             totalFingerDampingRate += fingerDamping;
 
-            // 指数関数的モード初期抑制（Exponential Modal Clamp）:
-            // 指が触れているモード（overlapFactor > 0）は、初期励起の瞬間から
-            // 指数関数的にエネルギーを奪われる。減衰率が大きいモードほど強く抑制される。
-            const modeClamp = Math.exp(-fingerDamping * 0.042);
+            // 初期励起境界拘束（Initial Excitation Boundary Constraint）:
+            // 指が弦に接触している状態でピッキングすると、弦の初期変位形状が
+            // u(x_touch) ≈ 0 の境界条件に拘束される。
+            // モード n の初期振幅 A_n(0) は接触点での変位 |sin(kn·x_touch)| に比例して抑制される。
+            const constraintStrength = (skinNonlinearFactor * pointAmplitude * 350.0) / inertiaResistance;
+            const modeClamp = Math.exp(-constraintStrength * 0.042);
             modalExcitationFactor *= modeClamp;
           }
         }
 
-        // ピッキング位置の物理励起 (有限接触幅のsinc平滑化)
-        // 残留結合フロア: 実際のピッキングは点接触ではなく有限幅の接触領域を持つため、
-        // ピック位置がモードの節に当たっても完全にゼロにはならない
+        // ピッキング位置の物理励起（有限接触幅のsinc平滑化）
+        // フロアなし: sinc関数が有限幅の接触を厳密にモデルしている
         const sincArg = (kn * pluckWidth) / 2.0;
         const sincVal = sincArg === 0 ? 1.0 : Math.sin(sincArg) / sincArg;
         const rawExcitation = Math.sin(kn * x_pick) * sincVal;
-        const pickExcitation = Math.sqrt(rawExcitation * rawExcitation + 0.008);
+        const pickExcitation = Math.abs(rawExcitation);
 
         // 電磁気ピックアップ伝達関数（ファラデーの法則 × コームフィルター）
         let pickupSensitivity = 1.0;
@@ -668,7 +666,7 @@
         }
         pickupSensitivity = Math.max(0.004, pickupSensitivity);
 
-        // 初期励起振幅: 厳密な物理積算値
+        // 初期励起振幅: 厳密な物理積算値（人為的フロアなし）
         const puMultiplier = pickupType === 'piezo' ? 1.0 : (pickupSensitivity * 1.18);
         const baseInitialAmp = (0.75 / Math.pow(n, alpha)) * pickExcitation * puMultiplier * modalExcitationFactor;
 
