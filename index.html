@@ -1473,34 +1473,28 @@
           band.style.left = `${leftPct}%`;
           band.style.width = `${widthPct}%`;
 
-          // Handle Badge (タッチしやすい十分なタッチターゲット)
+          // Handle Badge (丸い指番号バッジ自体にPointer Eventsを設定して超高精度ドラッグ)
           const handle = document.createElement('div');
           handle.id = `finger-handle-${fIdx}`;
-          handle.className = `absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-7 h-7 rounded-full font-bold text-xs flex items-center justify-center shadow-xl border-2 z-30 cursor-grab active:cursor-grabbing touch-none select-none ${
+          handle.className = `absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-8 h-8 rounded-full font-bold text-xs flex items-center justify-center shadow-2xl border-2 z-30 cursor-grab active:cursor-grabbing touch-none select-none ${
             fIdx === 0 ? 'bg-rose-500 border-rose-200 text-slate-950 shadow-rose-500/50' : fIdx === 1 ? 'bg-sky-500 border-sky-200 text-slate-950 shadow-sky-500/50' : 'bg-amber-500 border-amber-200 text-slate-950 shadow-amber-500/50'
           }`;
           handle.style.left = `${centerRatio * 100}%`;
           handle.textContent = `${fIdx + 1}`;
 
-          // 透明なタッチ拡張領域（スマホ・PCでの超高精度ドラッグ＆キャプチャ）
-          const touchExpander = document.createElement('div');
-          touchExpander.id = `finger-expander-${fIdx}`;
-          touchExpander.className = 'absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-12 h-12 z-40 touch-none cursor-grab active:cursor-grabbing';
-          touchExpander.style.left = `${centerRatio * 100}%`;
-
-          // Pointer Eventsによる極上な滑らかドラッグ（途切れ・カクつきゼロ）
-          touchExpander.onpointerdown = (e) => {
+          // バッジ自体を掴んだ時だけポインタキャプチャ＆ドラッグ開始
+          handle.onpointerdown = (e) => {
             e.stopPropagation();
             state.draggingFingerIndex = fIdx;
             try { e.target.setPointerCapture(e.pointerId); } catch(err) {}
           };
-          touchExpander.onpointermove = (e) => {
+          handle.onpointermove = (e) => {
             if (state.draggingFingerIndex === fIdx) {
               e.stopPropagation();
               handleFingerPointerDrag(e.clientX, fIdx);
             }
           };
-          touchExpander.onpointerup = (e) => {
+          handle.onpointerup = (e) => {
             if (state.draggingFingerIndex === fIdx) {
               e.stopPropagation();
               state.draggingFingerIndex = -1;
@@ -1509,7 +1503,7 @@
               playSelectedString();
             }
           };
-          touchExpander.onpointercancel = (e) => {
+          handle.onpointercancel = (e) => {
             if (state.draggingFingerIndex === fIdx) {
               state.draggingFingerIndex = -1;
               renderApp();
@@ -1518,7 +1512,6 @@
 
           fingerBandsContainer.appendChild(band);
           fingerBandsContainer.appendChild(handle);
-          fingerBandsContainer.appendChild(touchExpander);
         }
       }
 
@@ -1527,7 +1520,8 @@
       stringsContainer.innerHTML = '';
       state.strings.forEach((str, sIdx) => {
         const strRow = document.createElement('div');
-        strRow.className = 'relative flex items-center h-6 cursor-pointer hover:bg-slate-800/60 rounded transition group touch-none';
+        // touch-noneを排除し、弦の上でも自由に横スクロールできるようにする
+        strRow.className = 'relative flex items-center h-6 cursor-pointer hover:bg-slate-800/60 rounded transition group';
 
         const isSelected = state.selectedStringIndex === sIdx;
         const labelDiv = document.createElement('div');
@@ -1580,14 +1574,12 @@
 
       const band = document.getElementById(`finger-band-${fIdx}`);
       const handle = document.getElementById(`finger-handle-${fIdx}`);
-      const expander = document.getElementById(`finger-expander-${fIdx}`);
 
       if (band) {
         band.style.left = `${leftPct}%`;
         band.style.width = `${widthPct}%`;
       }
       if (handle) handle.style.left = `${centerRatio * 100}%`;
-      if (expander) expander.style.left = `${centerRatio * 100}%`;
 
       // スライダー表示のリアルタイム同期
       const sliderValLabel = document.getElementById(`label-fpos-${fIdx}`);
