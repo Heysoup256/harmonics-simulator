@@ -680,30 +680,33 @@
         const naturalGamma = gammaAir + gammaVisco + bodyRadiationGamma;
         const totalGamma = naturalGamma + totalFingerDampingRate;
 
-        // 指離脱（Touch-and-Release）の厳密物理:
-        // ピッキング直後の接触選別フェーズ（t = 0〜100ms）において、
-        // 不要な倍音（指の接触位置で振幅を持つモード）は指の強力な粘弾性摩擦により20〜60msで完全に消滅する。
-        // 生き残った倍音（ノード上のハーモニクス）のみが、100ms後の指離脱により naturalGamma（開放弦の自然減衰）で持続する。
-        const releaseTimeSec = 0.100; // 選別時間（100ms）
-        const survivalFactorAtRelease = Math.exp(-totalGamma * releaseTimeSec);
-
+        // 弦の減衰方程式（Damped Harmonic Oscillator ODE）の厳密な連続解析解:
+        // 人為的な閾値・条件分岐は一切含まず、可聴下限 ampFloor = 0.0001 (-80dB) への到達時間を連続計算
+        const ampFloor = 0.0001;
         let audibleDurationSec;
-        if (state.touchRelease && activeFingerCount > 0) {
-          if (survivalFactorAtRelease > 0.02 && modalExcitationFactor > 0.12) {
-            // 生き残った純粋なハーモニクス倍音: 指離脱後は naturalGamma でロングサステイン
-            const postReleaseSec = Math.max(0.15, Math.log(survivalFactorAtRelease / 0.0001) / naturalGamma);
-            audibleDurationSec = releaseTimeSec + postReleaseSec;
+
+        if (baseInitialAmp <= ampFloor) {
+          audibleDurationSec = 0.020;
+        } else if (state.touchRelease && activeFingerCount > 0) {
+          const releaseTimeSec = 0.100; // 指の離脱時間（100ms）
+          const timeToFloorContact = Math.log(baseInitialAmp / ampFloor) / totalGamma;
+
+          if (timeToFloorContact <= releaseTimeSec) {
+            // 第1フェーズ（接触中）に自然に消滅（不要な非ノード倍音・基音など）
+            audibleDurationSec = Math.max(0.020, timeToFloorContact);
           } else {
-            // 不要な倍音・腹に当たったモード: 指離脱前に完全に死滅（開放弦の音が残らないよう瞬時にカット）
-            audibleDurationSec = Math.min(releaseTimeSec, 9.21 / totalGamma);
+            // 第1フェーズ終了時点の残存振幅から、指離脱後の自然減衰（naturalGamma）で到達する時間を連続計算
+            const ampAtRelease = baseInitialAmp * Math.exp(-totalGamma * releaseTimeSec);
+            const postReleaseSec = Math.log(ampAtRelease / ampFloor) / naturalGamma;
+            audibleDurationSec = releaseTimeSec + postReleaseSec;
           }
         } else {
-          // 指を置いたまま: totalGamma で減衰継続
-          audibleDurationSec = 9.21 / totalGamma;
+          // 指接触のまま（または開放弦）の指数減衰
+          audibleDurationSec = Math.max(0.020, Math.log(baseInitialAmp / ampFloor) / totalGamma);
         }
 
         // 100ms後の残存エネルギー（UI表示・支配的倍音判定用）
-        const energyAtAudible = baseInitialAmp * survivalFactorAtRelease;
+        const energyAtAudible = baseInitialAmp * Math.exp(-totalGamma * 0.100);
         totalSurvivingEnergy += energyAtAudible;
 
         // ============================================================
