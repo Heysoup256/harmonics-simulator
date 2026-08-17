@@ -622,20 +622,20 @@
                                 ((x1 / 2.0) - Math.sin(2.0 * kn * x1) / (4.0 * kn));
             
             const overlapFactor = Math.max(0, Math.min(1.0, integralVal / effectiveW));
-            // 物理力学: 太い弦（低音弦）ほど弦の線密度（質量慣性力）が大きく、指の皮膚摩擦に負けずに倍音が力強く鳴り響く
-            // 高音弦（細い弦）ほど指の接触で厳密にダンプされる
-            const inertiaResistance = Math.pow(gaugeFactor, 0.85);
-            const fingerDamping = (skinNonlinearFactor * overlapFactor * 140.0) / inertiaResistance;
+            // 物理力学: 太い弦（低音弦）ほど弦の線密度（質量慣性力）が大きく倍音が生き残りやすい
+            // 一方、細い1弦や腹（アンチノード）に触れたモードは、指の皮膚粘弾性（320/s）によりミリ秒単位で瞬殺される
+            const inertiaResistance = Math.pow(gaugeFactor, 0.70);
+            const fingerDamping = (skinNonlinearFactor * overlapFactor * 320.0) / inertiaResistance;
             
             totalFingerDampingRate += fingerDamping;
           }
         }
 
-        // ピッキング位置の物理励起 (有限接触幅のsinc平滑化 + 残留結合フロア)
+        // ピッキング位置の物理励起 (有限接触幅のsinc平滑化)
         const sincArg = (kn * pluckWidth) / 2.0;
         const sincVal = sincArg === 0 ? 1.0 : Math.sin(sincArg) / sincArg;
         const rawExcitation = Math.sin(kn * x_pick) * sincVal;
-        const pickExcitation = Math.sqrt(rawExcitation * rawExcitation + 0.025);
+        const pickExcitation = Math.sqrt(rawExcitation * rawExcitation + 0.005);
 
         // 電磁気ピックアップ伝達関数（ファラデーの法則 × コームフィルター）
         let pickupSensitivity = 1.0;
@@ -652,16 +652,18 @@
         // 物理力学: 指が触れている位置で振幅を持つモード（節点でない倍音）は、ピッキングの瞬間から指の皮膚によって振幅が激しくクランプされる。
         // 節点（ノード、totalFingerDampingRate ≈ 0）にある倍音のみが100%の振幅で励起される。
         const fingerInitialSuppression = activeFingerCount > 0 
-          ? Math.exp(-totalFingerDampingRate * 0.060) 
+          ? Math.exp(-totalFingerDampingRate * 0.085) 
           : 1.0;
 
         const puMultiplier = pickupType === 'piezo' ? 1.0 : (pickupSensitivity * 1.18);
         const baseInitialAmp = (0.75 / Math.pow(n, alpha)) * pickExcitation * puMultiplier * fingerInitialSuppression;
 
         // 弦固有の厳密な物理減衰率 gamma_n [1/sec]:
-        // gamma_n = gamma_air (質量とモード平方根依存) + gamma_visco (内部曲げヒステリシス n^1.35) + gamma_bridge
-        const gammaAir = airLossBase * massAirFactor * Math.sqrt(n);
-        const gammaVisco = 0.012 * Math.pow(n, 1.35);
+        // 短波長（高次倍音 n）の曲げ剛性内部ヒステリシス損 ∝ n^1.85
+        // 細い弦（1弦など）ほど表面積/質量比が大きく空気減衰が急峻
+        const stringThinnessFactor = Math.pow(0.23 / gaugeMm, 0.60);
+        const gammaAir = airLossBase * massAirFactor * Math.sqrt(n) * stringThinnessFactor;
+        const gammaVisco = 0.028 * Math.pow(n, 1.85) * stringThinnessFactor;
         const naturalGamma = gammaAir + gammaVisco + bodyRadiationGamma;
         const totalGamma = naturalGamma + totalFingerDampingRate;
 
@@ -674,12 +676,12 @@
 
         let audibleDurationSec;
         if (state.touchRelease && activeFingerCount > 0) {
-          if (survivalFactorAtRelease > 0.02) {
-            // 生き残ったハーモニクス倍音: 指離脱後は naturalGamma でロングサステイン
-            const postReleaseSec = Math.max(0.2, Math.log(survivalFactorAtRelease / 0.0001) / naturalGamma);
+          if (survivalFactorAtRelease > 0.02 && fingerInitialSuppression > 0.05) {
+            // 生き残った純粋なハーモニクス倍音: 指離脱後は naturalGamma でロングサステイン
+            const postReleaseSec = Math.max(0.15, Math.log(survivalFactorAtRelease / 0.0001) / naturalGamma);
             audibleDurationSec = releaseTimeSec + postReleaseSec;
           } else {
-            // 不要な倍音: 指離脱前に完全に死滅（開放弦の音が残らないよう瞬時にカット）
+            // 不要な倍音・腹に当たったモード: 指離脱前に完全に死滅（開放弦の音が残らないよう瞬時にカット）
             audibleDurationSec = Math.min(releaseTimeSec, 9.21 / totalGamma);
           }
         } else {
@@ -969,6 +971,45 @@
       }
 
       // ---- 弦のモード物理合成（①張力変動 + ②2次元偏光 + 物理減衰） ----
+      // 完全デッドミュート判定: 3本指で適当に触れた時など、すべての倍音がダンプされて残存エネルギーが極小の場合
+      const isDeadMuted = state.fingerCount > 0 && modalData.totalSurvivingEnergy < 0.015;
+
+      if (isDeadMuted) {
+        // オシレーターによる持続音は完全に遮断し、弦を弾いた瞬間の「ポコッ」「ツッ」というミュート打撃音のみを生成
+        const thumpDur = 0.025;
+        const thumpCount = Math.floor(ctx.sampleRate * thumpDur);
+        const thumpBuf = ctx.createBuffer(1, thumpCount, ctx.sampleRate);
+        const thumpData = thumpBuf.getChannelData(0);
+        for (let i = 0; i < thumpCount; i++) {
+          const t = i / thumpCount;
+          thumpData[i] = (Math.random() * 2.0 - 1.0) * Math.exp(-t * 28.0) * 0.35;
+        }
+        const thumpSource = ctx.createBufferSource();
+        thumpSource.buffer = thumpBuf;
+        const thumpFilter = ctx.createBiquadFilter();
+        thumpFilter.type = 'lowpass';
+        thumpFilter.frequency.setValueAtTime(isBass ? 450 : 850, now);
+        const thumpGain = ctx.createGain();
+        thumpGain.gain.setValueAtTime(0.06, now);
+        thumpSource.connect(thumpFilter);
+        thumpFilter.connect(thumpGain);
+        thumpGain.connect(masterGain);
+        thumpSource.start(now);
+        thumpSource.stop(now + thumpDur);
+
+        // 短時間でクリーンアップ
+        setTimeout(() => {
+          try {
+            masterGain.disconnect();
+            bodyShaper.input.disconnect();
+            bodyShaper.output.disconnect();
+            const idx = activeVoices.findIndex(v => v.masterGain === masterGain);
+            if (idx >= 0) activeVoices.splice(idx, 1);
+          } catch(e) {}
+        }, 120);
+        return;
+      }
+
       // 人為的カットは一切行わず、各モードの物理減衰率 gamma_n に完全追従
       modalData.harmonics.forEach((h, idx) => {
         if (h.initialAmp < 0.0001) return;
