@@ -278,10 +278,10 @@
               <!-- Fretboard Structure with Clean Surface Container -->
               <div class="flex items-stretch">
                 <!-- String Labels on the left -->
-                <div id="fret-string-labels" class="w-8 shrink-0 flex flex-col justify-around font-mono text-[10px] font-bold z-10 py-1 select-none"></div>
+                <div id="fret-string-labels" class="w-8 shrink-0 flex flex-col justify-around font-mono text-[11px] font-bold z-10 py-3 select-none"></div>
 
                 <!-- Main Active Fretboard Surface (Exact 0% to 100% Scale Length) -->
-                <div id="fretboard-board-surface" class="flex-1 relative h-28 bg-slate-900 border-y-2 border-slate-700 rounded-r cursor-crosshair">
+                <div id="fretboard-board-surface" class="flex-1 relative min-h-[190px] sm:min-h-[220px] bg-slate-900 border-y-2 border-slate-700 rounded-r cursor-crosshair">
                   <!-- Wire frets -->
                   <div id="fret-wires-container" class="absolute inset-0 pointer-events-none"></div>
                   <!-- Inlay dots -->
@@ -289,7 +289,7 @@
                   <!-- Finger colored bands -->
                   <div id="container-finger-bands-overlay" class="absolute inset-0 pointer-events-none"></div>
                   <!-- String lines (visual only) -->
-                  <div id="fret-strings-container" class="absolute inset-0 pointer-events-none flex flex-col justify-around py-1"></div>
+                  <div id="fret-strings-container" class="absolute inset-0 pointer-events-none flex flex-col justify-around py-3"></div>
                   <!-- Picking Flash Line -->
                   <div id="pluck-flash-line" class="absolute top-0 bottom-0 w-1 bg-amber-400 shadow-[0_0_12px_#fbbf24] pointer-events-none transition-opacity duration-200 opacity-0 z-25"></div>
                   <!-- Finger draggable handles (Top layer with pointer-events-auto) -->
@@ -1372,15 +1372,21 @@
         const numDiv = document.createElement('div');
         numDiv.className = 'absolute -translate-x-1/2 font-bold font-mono';
         
-        if ([3,5,7,9,12,15,17,19,21,24].includes(f)) {
-          numDiv.className += ' text-amber-400 text-[11px] font-extrabold';
-        } else {
-          numDiv.className += ' text-slate-500 text-[9px]';
-        }
-
         const fretRatio = (1.0 - Math.pow(2, -f / 12.0));
         numDiv.style.left = `${fretRatio * 100}%`;
-        numDiv.textContent = `${f}`;
+
+        const relFret = f - state.capo;
+        if (f === state.capo) {
+          numDiv.textContent = '0';
+          numDiv.className += ' text-amber-400 bg-amber-500/20 px-1 rounded text-[11px] font-extrabold';
+        } else if (f < state.capo) {
+          numDiv.textContent = '-';
+          numDiv.className += ' text-slate-600 text-[9px]';
+        } else {
+          numDiv.textContent = `${relFret}`;
+          const isHighlighted = [3, 5, 7, 9, 12, 15, 17, 19, 21, 24].includes(relFret);
+          numDiv.className += isHighlighted ? ' text-amber-400 font-extrabold text-[11px]' : ' text-slate-400 text-[9px]';
+        }
         numbersRow.appendChild(numDiv);
       }
 
