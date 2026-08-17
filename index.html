@@ -395,14 +395,16 @@
         ? (state.stringCount === 4 ? BASS_GAUGES_4 : state.stringCount === 5 ? BASS_GAUGES_5 : BASS_GAUGES_6)
         : (state.stringCount === 7 ? GUITAR_GAUGES_7 : GUITAR_GAUGES_6);
 
-      if (foundPreset && foundPreset.strings) {
+      if (foundPreset && foundPreset.strings && foundPreset.strings.length > 0) {
         state.strings = foundPreset.strings.map((s, idx) => {
-          const g = gauges[idx] || { mm: 0.23, inch: ".009" };
+          const defaultGauge = gauges[idx] || { mm: 0.23, inch: ".009" };
+          const curGaugeMm = (state.strings && state.strings[idx] && state.strings[idx].gaugeMm) ? state.strings[idx].gaugeMm : defaultGauge.mm;
+          const curGaugeInch = (state.strings && state.strings[idx] && state.strings[idx].gaugeInch) ? state.strings[idx].gaugeInch : defaultGauge.inch;
           return {
             note: s.note,
             octave: s.octave,
-            gaugeMm: g.mm,
-            gaugeInch: g.inch
+            gaugeMm: curGaugeMm,
+            gaugeInch: curGaugeInch
           };
         });
       }
@@ -440,18 +442,22 @@
     function renderPresetOptions() {
       const select = document.getElementById('select-preset');
       if (!select) return;
-      select.innerHTML = '';
 
       const instPresets = PRESETS[state.instrument] || PRESETS.guitar;
       const countPresets = instPresets[state.stringCount] || instPresets[6] || instPresets[4];
 
-      countPresets.forEach(p => {
-        const opt = document.createElement('option');
-        opt.value = p.id;
-        opt.textContent = p.name;
-        if (p.id === state.preset) opt.selected = true;
-        select.appendChild(opt);
-      });
+      select.innerHTML = countPresets.map(p => 
+        `<option value="${p.id}" ${p.id === state.preset ? 'selected' : ''}>${p.name}</option>`
+      ).join('');
+
+      select.value = state.preset;
+
+      select.onchange = (e) => {
+        state.preset = e.target.value;
+        applyPreset();
+        renderApp();
+        playSelectedString();
+      };
     }
 
     // --- Math & Harmonic Helper Functions ---
