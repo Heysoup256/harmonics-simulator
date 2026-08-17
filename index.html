@@ -1257,7 +1257,7 @@
           row.innerHTML = `
             <div class="flex justify-between items-center text-xs">
               <span class="font-bold font-mono border px-1.5 py-0.5 rounded text-[11px] ${badgeColor}">指${fIdx + 1}</span>
-              <span class="font-bold font-mono text-amber-300">+${parseFloat(fPos).toFixed(2)} f</span>
+              <span id="label-fpos-${fIdx}" class="font-bold font-mono text-amber-300">+${parseFloat(fPos).toFixed(2)} f</span>
             </div>
             <div class="flex items-center gap-1.5 pt-0.5">
               <button class="btn-sub-f${fIdx} px-2 py-1 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 rounded text-[10px] font-mono text-slate-300 font-bold border border-slate-700 active:scale-95 transition">-0.1</button>
@@ -1461,6 +1461,7 @@
           const widthRatio = state.fingerWidthMm / fullScaleLengthMm;
 
           const band = document.createElement('div');
+          band.id = `finger-band-${fIdx}`;
           band.className = 'absolute top-0 bottom-0 border-x-2 z-20 transition-all duration-75';
           if (fIdx === 0) band.className += ' bg-rose-500/30 border-rose-400 shadow-[0_0_8px_rgba(244,63,94,0.5)]';
           else if (fIdx === 1) band.className += ' bg-sky-500/30 border-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.5)]';
@@ -1472,18 +1473,48 @@
           band.style.left = `${leftPct}%`;
           band.style.width = `${widthPct}%`;
 
-          // Handle Badge (タッチしやすい十分なタッチターゲット 48px 判定)
+          // Handle Badge (タッチしやすい十分なタッチターゲット)
           const handle = document.createElement('div');
+          handle.id = `finger-handle-${fIdx}`;
           handle.className = `absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-7 h-7 rounded-full font-bold text-xs flex items-center justify-center shadow-xl border-2 z-30 cursor-grab active:cursor-grabbing touch-none select-none ${
             fIdx === 0 ? 'bg-rose-500 border-rose-200 text-slate-950 shadow-rose-500/50' : fIdx === 1 ? 'bg-sky-500 border-sky-200 text-slate-950 shadow-sky-500/50' : 'bg-amber-500 border-amber-200 text-slate-950 shadow-amber-500/50'
           }`;
           handle.style.left = `${centerRatio * 100}%`;
           handle.textContent = `${fIdx + 1}`;
 
-          // 透明なタッチ拡張領域（スマホでの誤タップ防止・確実なドラッグ開始）
+          // 透明なタッチ拡張領域（スマホ・PCでの超高精度ドラッグ＆キャプチャ）
           const touchExpander = document.createElement('div');
-          touchExpander.className = 'absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-12 h-12 z-40 touch-none cursor-grab';
+          touchExpander.id = `finger-expander-${fIdx}`;
+          touchExpander.className = 'absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-12 h-12 z-40 touch-none cursor-grab active:cursor-grabbing';
           touchExpander.style.left = `${centerRatio * 100}%`;
+
+          // Pointer Eventsによる極上な滑らかドラッグ（途切れ・カクつきゼロ）
+          touchExpander.onpointerdown = (e) => {
+            e.stopPropagation();
+            state.draggingFingerIndex = fIdx;
+            try { e.target.setPointerCapture(e.pointerId); } catch(err) {}
+          };
+          touchExpander.onpointermove = (e) => {
+            if (state.draggingFingerIndex === fIdx) {
+              e.stopPropagation();
+              handleFingerPointerDrag(e.clientX, fIdx);
+            }
+          };
+          touchExpander.onpointerup = (e) => {
+            if (state.draggingFingerIndex === fIdx) {
+              e.stopPropagation();
+              state.draggingFingerIndex = -1;
+              try { e.target.releasePointerCapture(e.pointerId); } catch(err) {}
+              renderApp();
+              playSelectedString();
+            }
+          };
+          touchExpander.onpointercancel = (e) => {
+            if (state.draggingFingerIndex === fIdx) {
+              state.draggingFingerIndex = -1;
+              renderApp();
+            }
+          };
 
           fingerBandsContainer.appendChild(band);
           fingerBandsContainer.appendChild(handle);
@@ -1525,6 +1556,46 @@
         strRow.appendChild(lineContainer);
         stringsContainer.appendChild(strRow);
       });
+    }
+
+    // ドラッグ中の超高速・非破壊DOM更新（DOM再生成を行わずスタイルのみ更新するためポインタが絶対に途切れない）
+    function handleFingerPointerDrag(clientX, fIdx) {
+      const targetArea = document.getElementById('container-finger-bands-overlay') || boardArea;
+      const rect = targetArea.getBoundingClientRect();
+      const clickX = clientX - rect.left;
+      let ratio = Math.max(0, Math.min(0.998, clickX / rect.width));
+
+      const absFret = getFretFromRatio(ratio);
+      const relFret = Math.max(0, Math.min(28, absFret - state.capo));
+      const roundedFret = Math.round(relFret * 20) / 20;
+      state.fingerPositions[fIdx] = roundedFret;
+
+      // 指バンド・指ハンドルの位置を直接更新
+      const fullScale = state.instrument === 'bass' ? 864.0 : 648.0;
+      const actualAbsFret = state.capo + roundedFret;
+      const centerRatio = (1.0 - Math.pow(2, -actualAbsFret / 12.0));
+      const widthRatio = state.fingerWidthMm / fullScale;
+      const leftPct = Math.max(0, (centerRatio - widthRatio / 2.0) * 100);
+      const widthPct = Math.max(0.4, widthRatio * 100);
+
+      const band = document.getElementById(`finger-band-${fIdx}`);
+      const handle = document.getElementById(`finger-handle-${fIdx}`);
+      const expander = document.getElementById(`finger-expander-${fIdx}`);
+
+      if (band) {
+        band.style.left = `${leftPct}%`;
+        band.style.width = `${widthPct}%`;
+      }
+      if (handle) handle.style.left = `${centerRatio * 100}%`;
+      if (expander) expander.style.left = `${centerRatio * 100}%`;
+
+      // スライダー表示のリアルタイム同期
+      const sliderValLabel = document.getElementById(`label-fpos-${fIdx}`);
+      if (sliderValLabel) sliderValLabel.textContent = `+${roundedFret.toFixed(2)} f`;
+      const sliderEl = document.querySelector(`.slider-f${fIdx}`);
+      if (sliderEl) sliderEl.value = roundedFret;
+
+      renderSpectrumAnalyzer();
     }
 
     function renderSpectrumAnalyzer() {
@@ -1628,7 +1699,7 @@
       return Math.min(28.0, Math.max(0, fVal));
     }
 
-    function handleBoardInteraction(e, isDragMove = false) {
+    function handleBoardInteraction(e) {
       // フラッシュラインと同じコンテナ（container-finger-bands-overlay）の正確な座標領域を取得
       const targetArea = document.getElementById('container-finger-bands-overlay') || boardArea;
       const rect = targetArea.getBoundingClientRect();
@@ -1659,40 +1730,28 @@
       if (ratio < 0) ratio = 0;
       if (ratio > 0.998) ratio = 0.998;
 
-      // チェック: ドラッグ中の指ハンドルがあるか
-      if (isDragMove && state.draggingFingerIndex >= 0 && state.draggingFingerIndex < state.fingerCount) {
-        const absFret = getFretFromRatio(ratio);
-        const relFret = Math.max(0, Math.min(28, absFret - state.capo));
-        state.fingerPositions[state.draggingFingerIndex] = Math.round(relFret * 20) / 20;
-        renderApp();
-        return;
+      // カポ有効弦長（カポからブリッジまで）に対する相対ピッキング位置を計算
+      const capoRatio = state.capo > 0 ? (1.0 - Math.pow(2, -state.capo / 12.0)) : 0;
+      const effectiveRatio = Math.max(0.02, Math.min(0.99, (ratio - capoRatio) / (1.0 - capoRatio)));
+      state.pickPosRatio = effectiveRatio;
+
+      // ピッキング位置フラッシュラインを表示
+      const flashLine = document.getElementById('pluck-flash-line');
+      if (flashLine) {
+        flashLine.style.left = `${ratio * 100}%`;
+        flashLine.style.opacity = '1';
+        setTimeout(() => { flashLine.style.opacity = '0'; }, 220);
       }
 
-      // タップ操作（ピッキングまたはドラッグ開始）
-      if (!isDragMove) {
-        // カポ有効弦長（カポからブリッジまで）に対する相対ピッキング位置を計算
-        const capoRatio = state.capo > 0 ? (1.0 - Math.pow(2, -state.capo / 12.0)) : 0;
-        const effectiveRatio = Math.max(0.02, Math.min(0.99, (ratio - capoRatio) / (1.0 - capoRatio)));
-        state.pickPosRatio = effectiveRatio;
-
-        // ピッキング位置フラッシュラインを表示
-        const flashLine = document.getElementById('pluck-flash-line');
-        if (flashLine) {
-          flashLine.style.left = `${ratio * 100}%`;
-          flashLine.style.opacity = '1';
-          setTimeout(() => { flashLine.style.opacity = '0'; }, 220);
-        }
-
-        // ピッキング位置表示ラベルをリアルタイム更新
-        const lastPluckLabel = document.getElementById('label-last-pluck-pos');
-        if (lastPluckLabel) {
-          const posDesc = effectiveRatio >= 0.82 ? 'ブリッジ寄り' : effectiveRatio <= 0.55 ? 'ネック寄り' : '中間位置';
-          lastPluckLabel.textContent = `ピッキング位置: ${posDesc} (${(effectiveRatio * 100).toFixed(0)}%)`;
-        }
-
-        // 指マーク周辺かどうかに関わらず、タップされた弦を確実に発音！
-        window.playString(state.selectedStringIndex);
+      // ピッキング位置表示ラベルをリアルタイム更新
+      const lastPluckLabel = document.getElementById('label-last-pluck-pos');
+      if (lastPluckLabel) {
+        const posDesc = effectiveRatio >= 0.82 ? 'ブリッジ寄り' : effectiveRatio <= 0.55 ? 'ネック寄り' : '中間位置';
+        lastPluckLabel.textContent = `ピッキング位置: ${posDesc} (${(effectiveRatio * 100).toFixed(0)}%)`;
       }
+
+      // タップされた弦をクリアに発音
+      window.playString(state.selectedStringIndex);
     }
 
     // ポジションクイックジャンプボタン（スマホでもワンタップで目的のポジションへ瞬時に滑らかスクロール）
@@ -1716,87 +1775,30 @@
       };
     }
 
-    // マウスイベント（タッチ直後の偽マウスイベントは無視）
+    // マウスイベント（タップピッキング）
     boardArea.addEventListener('mousedown', (e) => {
       if (Date.now() - lastTouchTimestamp < 600) return;
-      handleBoardInteraction(e, false);
-    });
-    window.addEventListener('mousemove', (e) => {
-      if (Date.now() - lastTouchTimestamp < 600) return;
-      if (state.draggingFingerIndex >= 0) {
-        handleBoardInteraction(e, true);
-      }
-    });
-    window.addEventListener('mouseup', () => {
-      if (Date.now() - lastTouchTimestamp < 600) return;
-      if (state.draggingFingerIndex >= 0) {
-        state.draggingFingerIndex = -1;
-        playSelectedString();
-      }
+      handleBoardInteraction(e);
     });
 
-    // タッチイベント（滑らかな慣性横スクロールと確実な指ドラッグを完全両立）
+    // タッチイベント（滑らかな慣性横スクロールとタップピッキングの両立）
     let touchStartX = 0;
     let touchStartY = 0;
-    let isTouchDraggingFinger = false;
 
     boardArea.addEventListener('touchstart', (e) => {
       lastTouchTimestamp = Date.now();
       if (e.touches.length === 0) return;
-      const touch = e.touches[0];
-      touchStartX = touch.clientX;
-      touchStartY = touch.clientY;
-      isTouchDraggingFinger = false;
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+    }, { passive: true });
 
-      // 指マーク（ドラッグハンドル）をタップしたか判定
-      const targetArea = document.getElementById('container-finger-bands-overlay') || boardArea;
-      const rect = targetArea.getBoundingClientRect();
-      const clickX = touch.clientX - rect.left;
-      let ratio = clickX / rect.width;
-      
-      let clickedFingerIdx = -1;
-      if (state.fingerCount > 0) {
-        for (let fIdx = 0; fIdx < state.fingerCount; fIdx++) {
-          const fPos = state.fingerPositions[fIdx];
-          const absFret = state.capo + fPos;
-          const centerRatio = (1.0 - Math.pow(2, -absFret / 12.0));
-          if (Math.abs(ratio - centerRatio) < 0.055) {
-            clickedFingerIdx = fIdx;
-            break;
-          }
-        }
-      }
-
-      if (clickedFingerIdx >= 0) {
-        state.draggingFingerIndex = clickedFingerIdx;
-        isTouchDraggingFinger = true;
-        // 指ドラッグ中のみブラウザスクロールを一時停止
-        if (e.cancelable) e.preventDefault();
-      }
-    }, { passive: false });
-
-    window.addEventListener('touchmove', (e) => {
-      if (isTouchDraggingFinger && state.draggingFingerIndex >= 0 && e.touches.length > 0) {
-        lastTouchTimestamp = Date.now();
-        if (e.cancelable) e.preventDefault();
-        handleBoardInteraction(e.touches[0], true);
-      }
-    }, { passive: false });
-
-    window.addEventListener('touchend', (e) => {
-      if (isTouchDraggingFinger && state.draggingFingerIndex >= 0) {
-        lastTouchTimestamp = Date.now();
-        state.draggingFingerIndex = -1;
-        isTouchDraggingFinger = false;
-        playSelectedString();
-      } else if (!isTouchDraggingFinger) {
-        // 指ドラッグ以外の静止タップ（スワイプ移動距離 8px 未満）のみピッキングを発動
-        const touch = e.changedTouches && e.changedTouches.length > 0 ? e.changedTouches[0] : null;
-        if (touch) {
-          const dist = Math.hypot(touch.clientX - touchStartX, touch.clientY - touchStartY);
-          if (dist < 8) {
-            handleBoardInteraction(touch, false);
-          }
+    boardArea.addEventListener('touchend', (e) => {
+      // スワイプ移動距離が 8px 未満の静止タップのみピッキングを発動
+      const touch = e.changedTouches && e.changedTouches.length > 0 ? e.changedTouches[0] : null;
+      if (touch) {
+        const dist = Math.hypot(touch.clientX - touchStartX, touch.clientY - touchStartY);
+        if (dist < 8) {
+          handleBoardInteraction(touch);
         }
       }
     });
